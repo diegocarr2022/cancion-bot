@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: cancion-bot
+    runtime: python
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    disk:
+      name: cancion-bot-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: ADMIN_CHAT_ID
+        sync: false
+      - key: ACEDATACLOUD_API_TOKEN
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: BASE_URL
+        sync: false
+      - key: DLOCAL_API_KEY
+        sync: false
+      - key: DLOCAL_SECRET_KEY
+        sync: false
+      - key: DLOCAL_ENV
+        value: "sandbox"
+      - key: PRECIO_MXN
+        value: "197"
+      - key: PRECIO_TEXTO
+        value: "$197 MXN"
+      - key: DB_PATH
+        value: "/data/orders.db"
