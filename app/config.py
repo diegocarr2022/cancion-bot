@@ -7,7 +7,7 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 ACEDATACLOUD_API_TOKEN = os.environ["ACEDATACLOUD_API_TOKEN"]
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
-BASE_URL = os.environ["BASE_URL"].rstrip("/")
+BASE_URL = os.environ.get("BASE_URL", "").rstrip("/")
 DB_PATH = os.environ.get("DB_PATH", "/data/orders.db")
 
 # --- dLocal Go ---
