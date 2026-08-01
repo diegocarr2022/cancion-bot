@@ -7,9 +7,14 @@ chat para la cancion de prueba (Diego Andres): ahora lo hace el propio
 servidor, sin intervencion humana, para cada pedido nuevo.
 """
 import json
+import logging
+import re
+
 import httpx
 
 from app.config import ANTHROPIC_API_KEY
+
+log = logging.getLogger("cancion-bot")
 
 ANTHROPIC_API = "https://api.anthropic.com/v1/messages"
 
@@ -51,5 +56,26 @@ async def draft_song(order_data: dict) -> dict:
         )
         resp.raise_for_status()
         result = resp.json()
-        text = result["content"][0]["text"]
-        return json.loads(text)
+
+        # Buscamos el primer bloque de tipo "text" en la respuesta (Claude
+        # puede devolver otros tipos de bloque, como "thinking", antes del
+        # texto final - no asumimos que siempre es el primer elemento).
+        text = None
+        for block in result.get("content", []):
+            if block.get("type") == "text":
+                text = block.get("text")
+                break
+
+        if text is None:
+            log.error("Respuesta de Claude sin bloque de texto: %s", result)
+            raise ValueError("La respuesta de Claude no incluyo un bloque de texto")
+
+        # Por si Claude envuelve el JSON en un bloque de markdown (```json ... ```)
+        # a pesar de que se lo pedimos evitar.
+        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
+
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            log.error("No se pudo parsear el JSON de Claude. Texto recibido: %s", text)
+            raise
