@@ -22,6 +22,7 @@ Vos (admin) solo te enteras si algo sale realmente mal (pago rechazado,
 fallo tecnico) - no hace falta que intervengas en el camino feliz.
 """
 import logging
+import time
 
 from app import db
 from app.config import ADMIN_CHAT_ID, PRECIO_MXN, PRECIO_TEXTO, BASE_URL
@@ -99,12 +100,16 @@ async def generar_link_pago(chat_id: int, avisar_admin: bool = False) -> str | N
     """Crea un pago nuevo en dLocal Go y le manda el link al cliente.
     Devuelve el redirect_url, o None si fallo (y ahi si le avisamos al admin,
     porque eso es lo imprevisto)."""
+    # order_id tiene que ser unico por cada intento de pago - dLocal Go
+    # rechaza (400) si se reutiliza uno ya usado antes, por eso le agregamos
+    # un timestamp (por si el cliente pide un link nuevo tras uno fallido).
+    order_id = f"{chat_id}-{int(time.time())}"
     try:
         payment = await create_payment(
             amount=PRECIO_MXN,
             currency="MXN",
             country="MX",
-            order_id=str(chat_id),
+            order_id=order_id,
             description="Canción personalizada",
             notification_url=f"{BASE_URL}/dlocal/webhook",
             success_url=f"{BASE_URL}/pago-exitoso",
@@ -230,6 +235,8 @@ async def ejecutar_turno_claude(chat_id: int, text: str, system: str, tools: lis
     responda, y si pide usar alguna herramienta, la ejecuta y le devuelve el
     resultado para que pueda seguir (hasta MAX_TOOL_ROUNDS rondas, por
     seguridad)."""
+    log.info("[chat_id=%s] USUARIO: %s", chat_id, text)
+
     messages = db.get_messages(chat_id)
     messages.append({"role": "user", "content": text})
 
@@ -248,7 +255,13 @@ async def ejecutar_turno_claude(chat_id: int, text: str, system: str, tools: lis
 
         for block in assistant_content:
             if block.get("type") == "text" and block.get("text"):
+                log.info("[chat_id=%s] CLAUDE (texto): %s", chat_id, block["text"])
                 await send_message(chat_id, block["text"])
+            elif block.get("type") == "tool_use":
+                log.info(
+                    "[chat_id=%s] CLAUDE llamo la herramienta '%s' con input=%s",
+                    chat_id, block.get("name"), block.get("input"),
+                )
 
         tool_use_blocks = [b for b in assistant_content if b.get("type") == "tool_use"]
 
@@ -259,6 +272,10 @@ async def ejecutar_turno_claude(chat_id: int, text: str, system: str, tools: lis
         tool_results = []
         for block in tool_use_blocks:
             result_text = await ejecutar_herramienta(block["name"], block.get("input", {}))
+            log.info(
+                "[chat_id=%s] Resultado de la herramienta '%s': %s",
+                chat_id, block["name"], result_text,
+            )
             tool_results.append(
                 {"type": "tool_result", "tool_use_id": block["id"], "content": result_text}
             )
