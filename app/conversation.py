@@ -10,10 +10,14 @@ tengas que confirmar nada a mano.
 El comando /confirmar sigue existiendo como respaldo manual por si el
 webhook fallara o se demorara.
 """
+import logging
+
 from app import db
 from app.config import ADMIN_CHAT_ID, PRECIO_MXN, PRECIO_TEXTO, BASE_URL
 from app.dlocal_client import create_payment
 from app.telegram_client import send_message
+
+log = logging.getLogger("cancion-bot")
 
 STEPS = [
     ("nombre", "¿Para quién es la canción? (nombre completo)"),
@@ -61,6 +65,12 @@ async def handle_message(chat_id: int, text: str):
         )
         return
 
+    if current_step == "generando_pago":
+        # Ya se disparo la creacion del pago para este pedido - no hacemos
+        # nada mas, para evitar crear un pago duplicado si Telegram reenvia
+        # el mismo mensaje.
+        return
+
     if current_step == "hecho":
         await send_message(chat_id, "Ya tenés un pedido en curso. Si querés empezar uno nuevo, escribe /start.")
         return
@@ -77,20 +87,39 @@ async def handle_message(chat_id: int, text: str):
         db.update_order(chat_id, step=next_field)
         await send_message(chat_id, question)
     else:
+        # Marcamos el pedido como "en proceso" ANTES de llamar a dLocal Go,
+        # asi si este mismo mensaje llega duplicado mientras la llamada esta
+        # en curso, el chequeo de arriba ("generando_pago") lo frena.
+        db.update_order(chat_id, step="generando_pago")
+
         data = db.get_data(chat_id)
         resumen = "\n".join(f"- {k}: {v}" for k, v in data.items())
 
         await send_message(chat_id, "Perfecto, generando tu link de pago...")
 
-        payment = await create_payment(
-            amount=PRECIO_MXN,
-            currency="MXN",
-            country="MX",
-            order_id=str(chat_id),
-            description=f"Canción personalizada para {data.get('nombre', 'cliente')}",
-            notification_url=f"{BASE_URL}/dlocal/webhook",
-            success_url=f"{BASE_URL}/pago-exitoso",
-        )
+        try:
+            payment = await create_payment(
+                amount=PRECIO_MXN,
+                currency="MXN",
+                country="MX",
+                order_id=str(chat_id),
+                description=f"Canción personalizada para {data.get('nombre', 'cliente')}",
+                notification_url=f"{BASE_URL}/dlocal/webhook",
+                success_url=f"{BASE_URL}/pago-exitoso",
+            )
+        except Exception:
+            log.exception("Error creando el pago en dLocal Go para chat_id=%s", chat_id)
+            db.update_order(chat_id, step="restricciones")  # permite reintentar
+            await send_message(
+                chat_id,
+                "Tuvimos un problema generando tu link de pago. Ya lo estamos "
+                "revisando, en un momento te contactamos.",
+            )
+            await send_message(
+                ADMIN_CHAT_ID,
+                f"⚠️ Falló la creación del pago para chat_id {chat_id}. Revisa los logs de Render.",
+            )
+            return
 
         db.update_order(
             chat_id,

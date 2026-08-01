@@ -60,7 +60,13 @@ async def telegram_webhook(
     else:
         return {"ok": True}
 
-    await handle_message(chat_id, text)
+    # IMPORTANTE: no hacemos "await" de handle_message aca. Si el procesamiento
+    # tarda (por ejemplo, la llamada a dLocal Go o a Claude), Telegram no
+    # espera indefinidamente una respuesta - si no le contestamos rapido,
+    # reenvia el mismo mensaje, y eso puede disparar acciones duplicadas
+    # (pagos duplicados, mensajes repetidos). Por eso confirmamos de una
+    # vez con {"ok": True} y seguimos procesando en segundo plano.
+    asyncio.create_task(handle_message(chat_id, text))
     return {"ok": True}
 
 
