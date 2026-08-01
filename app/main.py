@@ -4,12 +4,12 @@ import logging
 from fastapi import FastAPI, Request, Header, HTTPException
 
 from app import db
-from app.config import TELEGRAM_WEBHOOK_SECRET, BASE_URL
+from app.config import TELEGRAM_WEBHOOK_SECRET, BASE_URL, ADMIN_CHAT_ID
 from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
 from app.payment_confirm import confirmar_pago
 from app.suno_client import get_task_status
-from app.telegram_client import send_document_by_url, set_webhook
+from app.telegram_client import send_document_by_url, send_message, set_webhook
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("cancion-bot")
@@ -24,6 +24,7 @@ async def startup():
         result = await set_webhook(BASE_URL, TELEGRAM_WEBHOOK_SECRET)
         log.info("Telegram setWebhook: %s", result)
     asyncio.create_task(poll_suno_tasks_loop())
+    asyncio.create_task(poll_pending_payments_loop())
 
 
 @app.get("/")
@@ -137,3 +138,47 @@ async def check_and_deliver(order: dict):
         order["chat_id"], audio_url, caption="🎵 ¡Tu canción personalizada está lista!"
     )
     db.update_order(order["chat_id"], delivered=1)
+
+
+# ---------------------------------------------------------------------------
+# Loop de fondo: chequea pagos pendientes. Esto hace que la confirmacion de
+# pago sea autonoma incluso si el webhook de dLocal Go fallara por algun
+# motivo - vos (admin) solo te enteras si el pago realmente fallo
+# (rechazado/cancelado/expirado), nunca por el camino feliz.
+# ---------------------------------------------------------------------------
+async def poll_pending_payments_loop():
+    while True:
+        try:
+            pending = db.find_pending_payments()
+            for order in pending:
+                await check_payment_status(order)
+        except Exception:
+            log.exception("Error en el loop de polling de pagos")
+        await asyncio.sleep(20)
+
+
+async def check_payment_status(order: dict):
+    try:
+        payment = await get_payment(order["payment_request_id"])
+    except Exception:
+        log.exception("Error consultando pago pendiente para chat_id=%s", order["chat_id"])
+        return
+
+    status = payment.get("status")
+
+    if status == "PAID":
+        await confirmar_pago(order["chat_id"])
+        return
+
+    if status in ("REJECTED", "CANCELLED", "EXPIRED") and order["step"] != "pago_fallido":
+        db.update_order(order["chat_id"], step="pago_fallido")
+        await send_message(
+            order["chat_id"],
+            "Parece que hubo un problema con tu pago (quedó como "
+            f"{status.lower()}). Contame y te genero un nuevo link, o dime "
+            "si tienes dudas sobre cómo pagar.",
+        )
+        await send_message(
+            ADMIN_CHAT_ID,
+            f"⚠️ El pago de chat_id {order['chat_id']} quedó en estado {status}.",
+        )

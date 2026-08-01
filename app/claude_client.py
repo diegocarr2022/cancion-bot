@@ -1,45 +1,29 @@
 """
-Usa la API de Claude (Anthropic) para redactar automaticamente la letra y
-el estilo musical a partir de los datos que dio el cliente por Telegram.
+Claude conduce TODA la conversacion con el cliente por Telegram, en dos
+etapas distintas (con distinto system prompt y herramientas cada una):
 
-Esta es la parte que reemplaza el trabajo manual que hicimos juntos en el
-chat para la cancion de prueba (Diego Andres): ahora lo hace el propio
-servidor, sin intervencion humana, para cada pedido nuevo.
+1. Mientras espera el pago: puede responder dudas sobre como pagar, y usar
+   herramientas para consultar el estado real del pago o generar un nuevo
+   link si el anterior fallo/expiro.
+2. Una vez pagado: pregunta por los detalles de la cancion, arma un
+   borrador, lo ajusta, y cuando el cliente aprueba, llama a la herramienta
+   finalizar_letra - eso dispara la generacion en Suno.
 """
-import json
-import logging
-import re
-
 import httpx
 
 from app.config import ANTHROPIC_API_KEY
 
-log = logging.getLogger("cancion-bot")
-
 ANTHROPIC_API = "https://api.anthropic.com/v1/messages"
 
-SYSTEM_PROMPT = """Eres un compositor experto en canciones personalizadas por encargo.
-Con los datos que te den de un pedido, generas:
-1. Un titulo corto y emotivo
-2. Un "style" (prompt de estilo musical para Suno AI): genero, instrumentos,
-   tempo, tipo de voz, atmosfera - todo en una sola linea descriptiva
-3. Una letra completa en español, con estructura [Verso 1] [Pre-Coro] [Coro]
-   [Verso 2] [Pre-Coro] [Coro] [Puente] [Coro final], que use los detalles y
-   anecdotas reales que te den (evita generalidades geneticas, se especifico).
-Reglas importantes:
-- Nunca inventes datos geograficos o de relaciones que no esten en el pedido
-  (ej: no asumas mar/costa si no se menciono, no asumas que alguien enseño
-  algo a menos que se diga explicitamente).
-- Respeta las restricciones que pida el cliente (temas a evitar).
-- Responde EXCLUSIVAMENTE con un JSON valido con las claves: title, style, lyric.
-"""
 
-
-async def draft_song(order_data: dict) -> dict:
-    user_content = (
-        "Datos del pedido:\n" + json.dumps(order_data, ensure_ascii=False, indent=2)
-    )
-    async with httpx.AsyncClient(timeout=60) as client:
+async def send_chat(messages: list, system: str, tools: list) -> dict:
+    """
+    messages ya viene en el formato que espera la API de Anthropic
+    (lista de {"role": "user"|"assistant", "content": ...}). Devuelve la
+    respuesta cruda de la API (incluye response["content"], una lista de
+    bloques que pueden ser de tipo "text" y/o "tool_use").
+    """
+    async with httpx.AsyncClient(timeout=90) as client:
         resp = await client.post(
             ANTHROPIC_API,
             headers={
@@ -50,32 +34,126 @@ async def draft_song(order_data: dict) -> dict:
             json={
                 "model": "claude-sonnet-5",
                 "max_tokens": 2000,
-                "system": SYSTEM_PROMPT,
-                "messages": [{"role": "user", "content": user_content}],
+                "system": system,
+                "messages": messages,
+                "tools": tools,
             },
         )
         resp.raise_for_status()
-        result = resp.json()
+        return resp.json()
 
-        # Buscamos el primer bloque de tipo "text" en la respuesta (Claude
-        # puede devolver otros tipos de bloque, como "thinking", antes del
-        # texto final - no asumimos que siempre es el primer elemento).
-        text = None
-        for block in result.get("content", []):
-            if block.get("type") == "text":
-                text = block.get("text")
-                break
 
-        if text is None:
-            log.error("Respuesta de Claude sin bloque de texto: %s", result)
-            raise ValueError("La respuesta de Claude no incluyo un bloque de texto")
+# ---------------------------------------------------------------------------
+# Etapa 1: esperando el pago
+# ---------------------------------------------------------------------------
+PAYMENT_SYSTEM_PROMPT = """Eres un asistente calido que ayuda a un cliente que esta a punto de pagar
+una cancion personalizada por Telegram. Ya le mandaron un link de pago (se
+puede pagar con tarjeta, en OXXO, o por transferencia).
 
-        # Por si Claude envuelve el JSON en un bloque de markdown (```json ... ```)
-        # a pesar de que se lo pedimos evitar.
-        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
+Tu trabajo en esta etapa:
+- Responder dudas sobre como pagar (metodos aceptados, que hacer si el link
+  no carga, cuanto tarda en confirmarse una transferencia u OXXO, etc.)
+- Si el cliente pregunta si ya se confirmo su pago, o dice que ya pago pero
+  no ve avance, usa la herramienta revisar_estado_pago para consultar el
+  estado REAL antes de responder - nunca asumas ni inventes que ya se
+  confirmo.
+- Si el cliente dice que el link no le funciono, que expiro, o pide uno
+  nuevo, usa la herramienta generar_nuevo_link_pago.
+- Se breve, calido, y humano. Respondes siempre en espanol.
+- No tenes forma de generar la cancion todavia - eso es despues de que se
+  confirme el pago.
+"""
 
-        try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError:
-            log.error("No se pudo parsear el JSON de Claude. Texto recibido: %s", text)
-            raise
+PAYMENT_TOOLS = [
+    {
+        "name": "revisar_estado_pago",
+        "description": (
+            "Consulta el estado real del pago del cliente en la pasarela de "
+            "pagos (dLocal Go). Usala cuando el cliente pregunte si ya se "
+            "confirmo su pago, o diga que ya pago pero no ve avance."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "generar_nuevo_link_pago",
+        "description": (
+            "Genera un nuevo link de pago. Usala solo si el cliente dice que "
+            "el link anterior no funciono, expiro, o pide explicitamente uno "
+            "nuevo."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+]
+
+
+# ---------------------------------------------------------------------------
+# Etapa 2: charlando sobre la cancion (ya pagado)
+# ---------------------------------------------------------------------------
+CONTENT_SYSTEM_PROMPT = """Eres un asistente calido y conversacional que ayuda a crear canciones
+personalizadas por encargo, chateando por Telegram con el cliente. El cliente
+YA PAGO, asi que tu trabajo es:
+
+1. Preguntar de forma natural (NO como formulario ni checklist rigido) sobre:
+   para quien es la cancion, la relacion con esa persona, la ocasion, el
+   genero/estilo musical que prefiere, si quiere voz masculina o femenina, y
+   2-3 anecdotas o detalles especificos que hagan la cancion unica (evita
+   generalidades genericas - cuantos mas detalles reales, mejor). Podes
+   combinar preguntas y seguir el ritmo natural de la charla, no hace falta
+   preguntar una cosa a la vez.
+
+2. Cuando sientas que tenes suficiente informacion, escribe un borrador
+   completo de la letra (estructura [Verso 1] [Pre-Coro] [Coro] [Verso 2]
+   [Pre-Coro] [Coro] [Puente] [Coro final]), junto con un titulo sugerido y
+   una breve descripcion del estilo musical (para Suno AI: genero,
+   instrumentos, tempo, tipo de voz, atmosfera), y mostraselo al cliente de
+   forma clara y bien formateada, preguntando si le gusta o quiere algun
+   cambio.
+
+3. Si pide cambios, ajusta la letra y mostrasela de nuevo, cuantas veces
+   haga falta.
+
+4. Cuando el cliente confirme EXPLICITAMENTE que esta conforme con la letra
+   (dijo algo como "si", "me gusta", "perfecto", "asi esta bien", "dale"),
+   llama a la funcion finalizar_letra con el titulo, estilo, y letra final
+   ya definitiva (con todos los cambios incorporados), y en tu mensaje de
+   texto avisale que en un par de minutos le compartis la cancion.
+
+Reglas importantes:
+- Nunca inventes datos (geografia, relaciones, hechos) que el cliente no
+  haya mencionado explicitamente.
+- Respeta cualquier restriccion que pida el cliente (temas a evitar).
+- Se calido, natural y humano en el tono - nada de sonar como un formulario
+  o un robot.
+- Responde siempre en espanol.
+- NO llames a finalizar_letra hasta que el cliente haya aprobado
+  explicitamente la letra.
+"""
+
+CONTENT_TOOLS = [
+    {
+        "name": "finalizar_letra",
+        "description": (
+            "Llamar UNICAMENTE cuando el cliente haya confirmado explicitamente "
+            "que esta conforme con la letra final de la cancion. Pasa el titulo, "
+            "el estilo musical (prompt descriptivo para Suno AI) y la letra "
+            "completa y definitiva, ya con todos los cambios que pidio el cliente."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Titulo corto y emotivo de la cancion"},
+                "style": {
+                    "type": "string",
+                    "description": "Estilo musical para Suno AI: genero, instrumentos, tempo, "
+                                    "tipo de voz, atmosfera - en una sola linea descriptiva",
+                },
+                "lyric": {
+                    "type": "string",
+                    "description": "Letra completa final, con estructura [Verso 1] [Pre-Coro] "
+                                    "[Coro] [Verso 2] [Pre-Coro] [Coro] [Puente] [Coro final]",
+                },
+            },
+            "required": ["title", "style", "lyric"],
+        },
+    }
+]
