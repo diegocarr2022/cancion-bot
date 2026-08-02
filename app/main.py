@@ -129,6 +129,10 @@ async def check_and_deliver(order: dict):
     state = task.get("state")
     response = task.get("response") or {}
     success = bool(response.get("success"))
+    log.info(
+        "Suno task %s (chat_id=%s): state=%s success=%s",
+        order["suno_task_id"], order["chat_id"], state, success,
+    )
 
     if state == "failed" or (state == "complete" and not success):
         log.error("La generacion de Suno fallo para chat_id=%s: %s", order["chat_id"], response)
