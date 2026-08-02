@@ -62,6 +62,21 @@ async def handle_message(chat_id: int, text: str):
         await reintentar_generacion(int(partes[1]))
         return
 
+    if chat_id == ADMIN_CHAT_ID and text.strip().lower().startswith("/reiniciar_chat"):
+        partes = text.strip().split()
+        if len(partes) != 2:
+            await send_message(chat_id, "Uso: /reiniciar_chat <chat_id_del_cliente>")
+            return
+        target_chat_id = int(partes[1])
+        db.set_messages(target_chat_id, [])
+        await send_message(
+            chat_id,
+            f"Historial de conversación borrado para chat_id {target_chat_id} "
+            "(el pedido y el pago se mantienen). Pídele al cliente que escriba "
+            "algo para retomar la charla desde cero.",
+        )
+        return
+
     order = db.get_order(chat_id)
 
     # --- /start: explica el proceso y genera el link de pago ---
