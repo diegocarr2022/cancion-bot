@@ -8,7 +8,7 @@ from app.config import TELEGRAM_WEBHOOK_SECRET, BASE_URL, ADMIN_CHAT_ID
 from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
 from app.payment_confirm import confirmar_pago
-from app.suno_client import get_task_status
+from app.suno_client import get_task_status, generate_custom_song
 from app.telegram_client import send_document_by_url, send_message, set_webhook
 
 logging.basicConfig(level=logging.INFO)
@@ -25,6 +25,7 @@ async def startup():
         log.info("Telegram setWebhook: %s", result)
     asyncio.create_task(poll_suno_tasks_loop())
     asyncio.create_task(poll_pending_payments_loop())
+    asyncio.create_task(poll_stuck_generation_loop())
 
 
 @app.get("/")
@@ -181,4 +182,39 @@ async def check_payment_status(order: dict):
         await send_message(
             ADMIN_CHAT_ID,
             f"⚠️ El pago de chat_id {order['chat_id']} quedó en estado {status}.",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Loop de fondo: si una cancion se quedo "a medias" (la letra ya se aprobo,
+# pero nunca se le mando a Suno o el proceso se corto a mitad de camino - por
+# ejemplo por un redeploy) la reintenta sola. Asi no hace falta ningun
+# comando manual para el caso mas comun de fallo.
+# ---------------------------------------------------------------------------
+async def poll_stuck_generation_loop():
+    while True:
+        try:
+            stuck = db.find_stuck_generation()
+            for order in stuck:
+                await reintentar_generacion_automatica(order)
+        except Exception:
+            log.exception("Error en el loop de polling de generaciones atascadas")
+        await asyncio.sleep(30)
+
+
+async def reintentar_generacion_automatica(order: dict):
+    chat_id = order["chat_id"]
+    log.info("Reintentando automaticamente la generacion atascada de chat_id=%s", chat_id)
+    try:
+        result = await generate_custom_song(
+            lyric=order["final_lyric"], title=order["final_title"], style=order["final_style"]
+        )
+        task_id = result.get("task_id") or result.get("id")
+        db.update_order(chat_id, suno_task_id=task_id)
+    except Exception:
+        log.exception("Volvio a fallar el reintento automatico de Suno para chat_id=%s", chat_id)
+        await send_message(
+            ADMIN_CHAT_ID,
+            f"⚠️ La generación de la canción de chat_id {chat_id} sigue fallando "
+            "después de un reintento automático. Puede necesitar revisión manual.",
         )

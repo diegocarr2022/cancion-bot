@@ -138,3 +138,24 @@ def find_pending_payments():
             "SELECT * FROM orders WHERE paid = 0 AND payment_request_id IS NOT NULL"
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def find_stuck_generation(older_than_seconds: int = 900):
+    """Pedidos que ya tienen la letra final aprobada, deberian estar
+    generandose en Suno, pero no tienen task_id - suele pasar si el proceso
+    se reinicio (deploy) justo mientras se estaba mandando a generar. Se
+    reintentan solos, sin que nadie tenga que escribir un comando.
+
+    IMPORTANTE: el umbral (900s = 15 min) tiene que ser MAYOR al tiempo
+    maximo que puede tardar una generacion normal (hasta 600s/10 min, ver
+    GENERATE_TIMEOUT en suno_client.py) - si no, este chequeo podria
+    reintentar una generacion que en realidad sigue en curso normalmente en
+    el mismo proceso, generando una cancion duplicada."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM orders WHERE step = 'generando' AND suno_task_id IS NULL "
+            "AND final_lyric IS NOT NULL "
+            "AND (julianday('now') - julianday(updated_at)) * 86400 > ?",
+            (older_than_seconds,),
+        ).fetchall()
+        return [dict(r) for r in rows]

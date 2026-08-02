@@ -69,6 +69,13 @@ async def handle_message(chat_id: int, text: str):
             return
         target_chat_id = int(partes[1])
         db.set_messages(target_chat_id, [])
+        target_order = db.get_order(target_chat_id)
+        # Si ya estaba pagado pero por algun bug habia quedado atascado en una
+        # etapa de pago, lo corregimos de una vez.
+        if target_order and target_order["paid"] and target_order["step"] in (
+            "creando_pago", "esperando_pago", "pago_fallido"
+        ):
+            db.update_order(target_chat_id, step="charlando")
         await send_message(
             chat_id,
             f"Historial de conversación borrado para chat_id {target_chat_id} "
@@ -78,9 +85,22 @@ async def handle_message(chat_id: int, text: str):
         return
 
     order = db.get_order(chat_id)
+    is_start = text.strip().lower() in ("/start", "/inicio")
+
+    # Si ya pago, /start NUNCA debe reiniciar el pago - solo lo mandamos a
+    # seguir donde estaba. Este chequeo va ANTES de crear/reiniciar el pedido.
+    if is_start and order is not None and order["paid"]:
+        if order["step"] in ("creando_pago", "esperando_pago", "pago_fallido"):
+            db.update_order(chat_id, step="charlando")
+        await send_message(
+            chat_id,
+            "Tu pago ya está confirmado, ¡sigamos con tu canción! Cuéntame de "
+            "nuevo (o seguimos donde íbamos) 🎶",
+        )
+        return
 
     # --- /start: explica el proceso y genera el link de pago ---
-    if text.strip().lower() in ("/start", "/inicio") or order is None:
+    if is_start or order is None:
         db.create_order(chat_id)
         db.update_order(chat_id, step="creando_pago")
         await send_message(chat_id, INTRO_TEXT)
