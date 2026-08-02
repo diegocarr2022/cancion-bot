@@ -120,15 +120,34 @@ async def poll_suno_tasks_loop():
 
 
 async def check_and_deliver(order: dict):
-    task = await get_task_status(order["suno_task_id"])
-    state = task.get("state") or task.get("status")
-
-    if state not in ("succeeded", "completed", "finished"):
+    try:
+        task = await get_task_status(order["suno_task_id"])
+    except Exception:
+        log.exception("Error consultando estado de Suno para chat_id=%s", order["chat_id"])
         return
 
+    state = task.get("state")
+    response = task.get("response") or {}
+    success = bool(response.get("success"))
+
+    if state == "failed" or (state == "complete" and not success):
+        log.error("La generacion de Suno fallo para chat_id=%s: %s", order["chat_id"], response)
+        db.update_order(order["chat_id"], step="charlando", suno_task_id=None)
+        await send_message(
+            order["chat_id"],
+            "Hubo un problema generando tu canción. Ya lo estamos revisando, en un momento seguimos.",
+        )
+        await send_message(
+            ADMIN_CHAT_ID, f"⚠️ Suno reportó 'failed' para chat_id {order['chat_id']}: {response}"
+        )
+        return
+
+    if state != "complete" or not success:
+        return  # sigue "pending"/"processing" - todavia no esta lista
+
     audio_url = None
-    for item in task.get("data", []) or task.get("result", []):
-        audio_url = item.get("audio_url") or item.get("url")
+    for item in response.get("data", []):
+        audio_url = item.get("audio_url")
         if audio_url:
             break
 
