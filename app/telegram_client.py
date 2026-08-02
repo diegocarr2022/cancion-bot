@@ -48,6 +48,15 @@ async def send_document_by_url(
         return bool(data2.get("ok"))
 
 
+async def get_me() -> dict:
+    """Info del bot (incluye el username) - se usa para armar el link t.me/...
+    del boton de "volver a Telegram" en la pagina de pago exitoso."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(f"{TELEGRAM_API}/getMe")
+        data = resp.json()
+        return data.get("result", {}) if data.get("ok") else {}
+
+
 async def set_webhook(base_url: str, secret_token: str):
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(

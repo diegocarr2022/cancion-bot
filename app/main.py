@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from fastapi import FastAPI, Request, Header, HTTPException
+from fastapi.responses import HTMLResponse
 
 from app import db
 from app.config import TELEGRAM_WEBHOOK_SECRET, BASE_URL, ADMIN_CHAT_ID
@@ -9,20 +10,27 @@ from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
 from app.payment_confirm import confirmar_pago
 from app.suno_client import get_task_status, generate_custom_song
-from app.telegram_client import send_document_by_url, send_message, set_webhook
+from app.telegram_client import send_document_by_url, send_message, set_webhook, get_me
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("cancion-bot")
 
 app = FastAPI(title="Cancion Bot")
 
+# Se llena una vez al arrancar (ver startup) con el username del bot, para
+# poder armar el link t.me/... del boton de la pagina de pago exitoso.
+BOT_USERNAME = ""
+
 
 @app.on_event("startup")
 async def startup():
+    global BOT_USERNAME
     db.init_db()
     if BASE_URL:
         result = await set_webhook(BASE_URL, TELEGRAM_WEBHOOK_SECRET)
         log.info("Telegram setWebhook: %s", result)
+    me = await get_me()
+    BOT_USERNAME = me.get("username", "")
     asyncio.create_task(poll_suno_tasks_loop())
     asyncio.create_task(poll_pending_payments_loop())
     asyncio.create_task(poll_stuck_generation_loop())
@@ -31,6 +39,36 @@ async def startup():
 @app.get("/")
 async def health():
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Pagina a la que dLocal Go redirige al cliente en su navegador despues de
+# pagar (success_url). No hace falta que haga nada - la confirmacion real
+# del pago llega por webhook/polling - es solo para que el cliente no vea un
+# JSON crudo y sepa que puede volver a Telegram.
+# ---------------------------------------------------------------------------
+@app.get("/pago-exitoso", response_class=HTMLResponse)
+async def pago_exitoso():
+    boton = ""
+    if BOT_USERNAME:
+        boton = f"""
+        <a href="https://t.me/{BOT_USERNAME}"
+           style="display:inline-block; margin-top:24px; padding:14px 28px;
+                  background:#2AABEE; color:white; text-decoration:none;
+                  border-radius:8px; font-size:18px; font-weight:bold;">
+          ↩️ Volver a Telegram
+        </a>
+        """
+    return f"""
+    <html>
+      <head><meta charset="utf-8"><title>Pago recibido</title></head>
+      <body style="font-family: sans-serif; text-align: center; padding: 60px 20px;">
+        <h1>🎵 ¡Pago recibido!</h1>
+        <p>Ya puedes volver a Telegram para seguir con tu canción.</p>
+        {boton}
+      </body>
+    </html>
+    """
 
 
 # ---------------------------------------------------------------------------
