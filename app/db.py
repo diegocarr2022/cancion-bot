@@ -79,11 +79,33 @@ def get_order(chat_id: int):
 
 
 def create_order(chat_id: int):
+    """Crea un pedido nuevo para este chat_id. IMPORTANTE: un cliente tiene
+    que poder comprar mas de una vez. Como chat_id sigue siendo la clave
+    unica de la fila (un pedido "activo" a la vez por chat), si ya existia
+    un pedido anterior para este chat_id (tipicamente uno ya completado,
+    step="entregado") lo REINICIA por completo - borra letra final, datos de
+    pago, historial de mensajes, etc. - para que arranque una compra nueva
+    de cero. Esto solo debe llamarse cuando no hay un pedido en curso
+    (ver el chequeo en conversation.py antes de llamar a esta funcion)."""
     now = datetime.utcnow().isoformat()
     with get_conn() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO orders (chat_id, step, messages, created_at, updated_at) "
-            "VALUES (?, 'creando_pago', '[]', ?, ?)",
+            """
+            INSERT INTO orders (chat_id, step, messages, created_at, updated_at)
+            VALUES (?, 'creando_pago', '[]', ?, ?)
+            ON CONFLICT(chat_id) DO UPDATE SET
+                step = 'creando_pago',
+                messages = '[]',
+                final_title = NULL,
+                final_style = NULL,
+                final_lyric = NULL,
+                payment_request_id = NULL,
+                payment_url = NULL,
+                paid = 0,
+                suno_task_id = NULL,
+                delivered = 0,
+                updated_at = excluded.updated_at
+            """,
             (chat_id, now, now),
         )
 

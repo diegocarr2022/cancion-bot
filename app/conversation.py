@@ -93,9 +93,15 @@ async def handle_message(chat_id: int, text: str):
     order = db.get_order(chat_id)
     is_start = text.strip().lower() in ("/start", "/inicio")
 
-    # Si ya pago, /start NUNCA debe reiniciar el pago - solo lo mandamos a
-    # seguir donde estaba. Este chequeo va ANTES de crear/reiniciar el pedido.
-    if is_start and order is not None and order["paid"]:
+    # Si el pedido esta pagado pero TODAVIA EN CURSO (no entregado), /start
+    # NUNCA debe reiniciarlo - solo lo mandamos a seguir donde estaba. Este
+    # chequeo va ANTES de crear/reiniciar el pedido.
+    # IMPORTANTE: un pedido ya "entregado" (la cancion ya se mando) NO cae
+    # aca - un cliente tiene que poder comprar mas de una vez. Antes este
+    # chequeo bloqueaba /start para CUALQUIER pedido pagado sin importar el
+    # step, lo que dejaba al cliente atrapado para siempre despues de recibir
+    # su cancion (no podia iniciar una compra nueva).
+    if is_start and order is not None and order["paid"] and order["step"] != "entregado":
         if order["step"] in ("creando_pago", "esperando_pago", "pago_fallido"):
             db.update_order(chat_id, step="charlando")
         await send_message(
@@ -106,9 +112,12 @@ async def handle_message(chat_id: int, text: str):
         return
 
     # --- /start: explica el proceso y genera el link de pago ---
+    # Llega aca tanto para un cliente nuevo (order is None) como para uno que
+    # ya recibio una cancion antes (order.step == "entregado") y quiere
+    # comprar otra - db.create_order reinicia el pedido por completo en ese
+    # caso, asi que cada compra arranca limpia.
     if is_start or order is None:
         db.create_order(chat_id)
-        db.update_order(chat_id, step="creando_pago")
         await send_message(chat_id, INTRO_TEXT)
         await generar_link_pago(chat_id, avisar_admin=True)
         return
@@ -271,10 +280,31 @@ async def continuar_charla_cancion(chat_id: int, text: str):
 
 async def continuar_charla_entrega(chat_id: int, text: str):
     """Etapa 3: la cancion ya se entrego - Claude solo charla naturalmente
-    (agradecimientos, dudas, pedir otra cancion, etc.), sin respuestas fijas."""
+    (agradecimientos, dudas, pedir otra cancion, etc.), sin respuestas fijas.
+    Si el cliente quiere otra cancion, Claude mismo llama a
+    iniciar_pedido_nuevo - no hace falta que el cliente escriba /start ni
+    ningun otro comando."""
+    nuevo_pedido_iniciado = False
 
     async def ejecutar_herramienta(name: str, tool_input: dict) -> str:
-        return "Herramienta desconocida."
+        nonlocal nuevo_pedido_iniciado
+        if name != "iniciar_pedido_nuevo":
+            return "Herramienta desconocida."
+
+        db.create_order(chat_id)
+        url = await generar_link_pago(chat_id, avisar_admin=True)
+        nuevo_pedido_iniciado = True
+        if url:
+            return (
+                "Se creo el pedido nuevo y ya se le mando al cliente el link de pago "
+                "en un mensaje aparte. NO le repitas el link vos - solo confirmale con "
+                "calidez que ya se lo mandaste y que en cuanto pague seguimos con la "
+                "cancion nueva."
+            )
+        return (
+            "Hubo un problema tecnico generando el link de pago nuevo. Decile al "
+            "cliente que ya lo estamos revisando."
+        )
 
     await ejecutar_turno_claude(
         chat_id,
@@ -283,6 +313,16 @@ async def continuar_charla_entrega(chat_id: int, text: str):
         tools=DELIVERY_TOOLS,
         ejecutar_herramienta=ejecutar_herramienta,
     )
+
+    if nuevo_pedido_iniciado:
+        # IMPORTANTE: db.create_order ya reinicio el pedido (incluido el
+        # historial de mensajes) en la base de datos, pero el loop generico
+        # de arriba (ejecutar_turno_claude) va a haber vuelto a guardar el
+        # historial VIEJO (de la etapa de entrega) encima, porque no sabe que
+        # el pedido cambio a mitad de camino. Lo limpiamos de nuevo aca para
+        # que la charla de pago del pedido nuevo no arranque contaminada con
+        # referencias a la cancion anterior ya entregada.
+        db.set_messages(chat_id, [])
 
 
 async def ejecutar_turno_claude(chat_id: int, text: str, system: str, tools: list, ejecutar_herramienta):
