@@ -128,13 +128,27 @@ async def check_and_deliver(order: dict):
 
     state = task.get("state")
     response = task.get("response") or {}
-    success = bool(response.get("success"))
+    success = response.get("success")
+    data = response.get("data") or []
+
+    # IMPORTANTE (descubierto en produccion): el campo "state" no siempre
+    # llega como "complete"/"failed" - en la practica hemos visto
+    # state=None con success=True mientras la cancion todavia se esta
+    # generando. Por eso NO usamos "state" como senal confiable de que ya
+    # termino. La senal real es: hay un audio_url en response.data. Si
+    # success es explicitamente False, ahi si es un fallo real.
+    audio_url = None
+    for item in data:
+        audio_url = item.get("audio_url")
+        if audio_url:
+            break
+
     log.info(
-        "Suno task %s (chat_id=%s): state=%s success=%s",
-        order["suno_task_id"], order["chat_id"], state, success,
+        "Suno task %s (chat_id=%s): state=%s success=%s tiene_audio=%s raw=%s",
+        order["suno_task_id"], order["chat_id"], state, success, bool(audio_url), task,
     )
 
-    if state == "failed" or (state == "complete" and not success):
+    if success is False:
         log.error("La generacion de Suno fallo para chat_id=%s: %s", order["chat_id"], response)
         db.update_order(order["chat_id"], step="charlando", suno_task_id=None)
         await send_message(
@@ -146,17 +160,8 @@ async def check_and_deliver(order: dict):
         )
         return
 
-    if state != "complete" or not success:
-        return  # sigue "pending"/"processing" - todavia no esta lista
-
-    audio_url = None
-    for item in response.get("data", []):
-        audio_url = item.get("audio_url")
-        if audio_url:
-            break
-
     if not audio_url:
-        return
+        return  # todavia se esta generando - no hay audio_url todavia
 
     await send_document_by_url(
         order["chat_id"], audio_url, caption="🎵 ¡Tu canción personalizada está lista!"
