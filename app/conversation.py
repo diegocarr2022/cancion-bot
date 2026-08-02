@@ -33,6 +33,8 @@ from app.claude_client import (
     PAYMENT_TOOLS,
     CONTENT_SYSTEM_PROMPT,
     CONTENT_TOOLS,
+    DELIVERY_SYSTEM_PROMPT,
+    DELIVERY_TOOLS,
 )
 from app.suno_client import generate_custom_song
 from app.telegram_client import send_message
@@ -76,6 +78,10 @@ async def handle_message(chat_id: int, text: str):
             "creando_pago", "esperando_pago", "pago_fallido"
         ):
             db.update_order(target_chat_id, step="charlando")
+        # Si la cancion ya se entrego (delivered=1) pero por el bug viejo el
+        # step se habia quedado en "generando" para siempre, lo corregimos.
+        if target_order and target_order.get("delivered") and target_order["step"] != "entregado":
+            db.update_order(target_chat_id, step="entregado")
         await send_message(
             chat_id,
             f"Historial de conversación borrado para chat_id {target_chat_id} "
@@ -121,9 +127,7 @@ async def handle_message(chat_id: int, text: str):
         return
 
     if current_step == "entregado":
-        await send_message(
-            chat_id, "Ya te entregué tu canción. Si quieres pedir otra, escribe /start.",
-        )
+        await continuar_charla_entrega(chat_id, text)
         return
 
     if current_step == "charlando":
@@ -265,6 +269,22 @@ async def continuar_charla_cancion(chat_id: int, text: str):
     )
 
 
+async def continuar_charla_entrega(chat_id: int, text: str):
+    """Etapa 3: la cancion ya se entrego - Claude solo charla naturalmente
+    (agradecimientos, dudas, pedir otra cancion, etc.), sin respuestas fijas."""
+
+    async def ejecutar_herramienta(name: str, tool_input: dict) -> str:
+        return "Herramienta desconocida."
+
+    await ejecutar_turno_claude(
+        chat_id,
+        text,
+        system=DELIVERY_SYSTEM_PROMPT,
+        tools=DELIVERY_TOOLS,
+        ejecutar_herramienta=ejecutar_herramienta,
+    )
+
+
 async def ejecutar_turno_claude(chat_id: int, text: str, system: str, tools: list, ejecutar_herramienta):
     """Loop generico: manda el mensaje a Claude, muestra el texto que
     responda, y si pide usar alguna herramienta, la ejecuta y le devuelve el
@@ -331,7 +351,10 @@ async def reintentar_generacion(chat_id: int):
         )
         return
 
-    db.update_order(chat_id, step="generando")
+    # delivered=0 es importante: si la entrega anterior habia quedado marcada
+    # como "delivered" pese a que Telegram nunca la acepto de verdad, hay que
+    # resetearla para que el loop de polling la vuelva a considerar pendiente.
+    db.update_order(chat_id, step="generando", delivered=0)
     await send_message(chat_id, "Reintentando la generación de tu canción 🎧")
 
     try:

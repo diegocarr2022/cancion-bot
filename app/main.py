@@ -129,26 +129,36 @@ async def check_and_deliver(order: dict):
     state = task.get("state")
     response = task.get("response") or {}
     success = response.get("success")
-    data = response.get("data") or []
+    items = response.get("data") or []
 
-    # IMPORTANTE (descubierto en produccion): el campo "state" no siempre
-    # llega como "complete"/"failed" - en la practica hemos visto
-    # state=None con success=True mientras la cancion todavia se esta
-    # generando. Por eso NO usamos "state" como senal confiable de que ya
-    # termino. La senal real es: hay un audio_url en response.data. Si
-    # success es explicitamente False, ahi si es un fallo real.
-    audio_url = None
-    for item in data:
-        audio_url = item.get("audio_url")
-        if audio_url:
+    # IMPORTANTE (descubierto en produccion, con el error real de un 400 de
+    # Telegram al intentar entregar): "state" a nivel de la tarea y
+    # "response.success" NO son confiables (llegan None en la practica).
+    # Cada elemento de "data" es una variante (Suno genera 2 por pedido) y
+    # TIENE SU PROPIO "audio_url" que aparece MUY TEMPRANO - es un endpoint
+    # de streaming que existe desde que arranca la generacion, no cuando
+    # termina. La senal real de que una variante ya esta completamente
+    # renderizada (y por lo tanto es un archivo valido para mandarle a
+    # Telegram) es que ademas tenga "duration" (numero de segundos) - ese
+    # campo se queda en None mientras se sigue generando. Si entregamos en
+    # cuanto aparece audio_url sin esperar "duration", Telegram puede
+    # rechazar el archivo con 400 porque todavia esta a medio generar.
+    ready_item = None
+    hubo_error_en_variante = False
+    for item in items:
+        item_state = (item.get("state") or "").lower()
+        if item_state in ("error", "failed"):
+            hubo_error_en_variante = True
+        if item.get("audio_url") and item.get("duration"):
+            ready_item = item
             break
 
     log.info(
-        "Suno task %s (chat_id=%s): state=%s success=%s tiene_audio=%s raw=%s",
-        order["suno_task_id"], order["chat_id"], state, success, bool(audio_url), task,
+        "Suno task %s (chat_id=%s): state=%s success=%s lista=%s raw=%s",
+        order["suno_task_id"], order["chat_id"], state, success, bool(ready_item), task,
     )
 
-    if success is False:
+    if success is False or (hubo_error_en_variante and not ready_item):
         log.error("La generacion de Suno fallo para chat_id=%s: %s", order["chat_id"], response)
         db.update_order(order["chat_id"], step="charlando", suno_task_id=None)
         await send_message(
@@ -160,13 +170,43 @@ async def check_and_deliver(order: dict):
         )
         return
 
-    if not audio_url:
-        return  # todavia se esta generando - no hay audio_url todavia
+    if not ready_item:
+        return  # todavia se esta generando/transmitiendo - no esta lista de verdad
 
-    await send_document_by_url(
-        order["chat_id"], audio_url, caption="🎵 ¡Tu canción personalizada está lista!"
+    audio_url = ready_item["audio_url"]
+
+    enviado_ok = await send_document_by_url(
+        order["chat_id"],
+        audio_url,
+        caption="🎵 ¡Tu canción personalizada está lista!",
+        title=order.get("final_title") or "Tu canción",
     )
-    db.update_order(order["chat_id"], delivered=1)
+    if not enviado_ok:
+        # Telegram rechazo el archivo (por ejemplo, 400 porque la URL
+        # todavia no es un archivo completo y valido). NO marcamos como
+        # entregado - asi el loop de polling lo vuelve a intentar solo en
+        # 20 segundos, sin que nadie tenga que hacer nada manualmente.
+        log.warning(
+            "Telegram rechazo el archivo de Suno para chat_id=%s, se reintentara solo.",
+            order["chat_id"],
+        )
+        return
+
+    # Ademas del reproductor, mandamos el link directo como texto. El
+    # reproductor de audio de Telegram no siempre deja claro como descargar
+    # (en desktop hace falta click derecho, y no todos lo saben) - un link de
+    # texto es inequivoco: se toca/clickea y listo, se abre o descarga solo.
+    await send_message(
+        order["chat_id"],
+        "👇 Si quieres descargarla directo a tu teléfono o computadora, toca este link:\n"
+        f"{audio_url}",
+    )
+    # CRITICO: hay que mover el step a "entregado" ademas de marcar delivered=1.
+    # Si no, el pedido se queda "generando" para siempre y cualquier mensaje
+    # posterior del cliente (incluso un simple "gracias") recibe la respuesta
+    # fija de "tu cancion se esta generando" en conversation.py, sin importar
+    # que ya se le haya entregado.
+    db.update_order(order["chat_id"], delivered=1, step="entregado")
 
 
 # ---------------------------------------------------------------------------
