@@ -168,35 +168,43 @@ async def check_and_deliver(order: dict):
     response = task.get("response") or {}
     success = response.get("success")
     items = response.get("data") or []
+    total_items = len(items)
 
     # IMPORTANTE (descubierto en produccion, con el error real de un 400 de
     # Telegram al intentar entregar): "state" a nivel de la tarea y
     # "response.success" NO son confiables (llegan None en la practica).
-    # Cada elemento de "data" es una variante (Suno genera 2 por pedido) y
-    # TIENE SU PROPIO "audio_url" que aparece MUY TEMPRANO - es un endpoint
-    # de streaming que existe desde que arranca la generacion, no cuando
-    # termina. La senal real de que una variante ya esta completamente
-    # renderizada (y por lo tanto es un archivo valido para mandarle a
-    # Telegram) es que ademas tenga "duration" (numero de segundos) - ese
-    # campo se queda en None mientras se sigue generando. Si entregamos en
-    # cuanto aparece audio_url sin esperar "duration", Telegram puede
-    # rechazar el archivo con 400 porque todavia esta a medio generar.
-    ready_item = None
-    hubo_error_en_variante = False
+    # Cada elemento de "data" es una variante (Suno SIEMPRE genera 2 por
+    # pedido, dos versiones distintas de la misma cancion) y TIENE SU PROPIO
+    # "audio_url" que aparece MUY TEMPRANO - es un endpoint de streaming que
+    # existe desde que arranca la generacion, no cuando termina. La senal
+    # real de que una variante ya esta completamente renderizada (y por lo
+    # tanto es un archivo valido para mandarle a Telegram) es que ademas
+    # tenga "duration" (numero de segundos) - ese campo se queda en None
+    # mientras se sigue generando.
+    #
+    # Como las 2 variantes ya estan pagadas (el cliente paga por la
+    # generacion, no por una sola version), esperamos a que TODAS las
+    # variantes que no hayan fallado terminen, y se las entregamos ambas -
+    # asi el cliente se queda con las 2 versiones distintas que genero Suno.
+    ready_items = []
+    failed_count = 0
     for item in items:
         item_state = (item.get("state") or "").lower()
         if item_state in ("error", "failed"):
-            hubo_error_en_variante = True
+            failed_count += 1
+            continue
         if item.get("audio_url") and item.get("duration"):
-            ready_item = item
-            break
+            ready_items.append(item)
+
+    pendientes = total_items - failed_count - len(ready_items)
 
     log.info(
-        "Suno task %s (chat_id=%s): state=%s success=%s lista=%s raw=%s",
-        order["suno_task_id"], order["chat_id"], state, success, bool(ready_item), task,
+        "Suno task %s (chat_id=%s): state=%s success=%s listas=%d/%d fallidas=%d raw=%s",
+        order["suno_task_id"], order["chat_id"], state, success,
+        len(ready_items), total_items, failed_count, task,
     )
 
-    if success is False or (hubo_error_en_variante and not ready_item):
+    if success is False or (total_items > 0 and failed_count == total_items):
         log.error("La generacion de Suno fallo para chat_id=%s: %s", order["chat_id"], response)
         db.update_order(order["chat_id"], step="charlando", suno_task_id=None)
         await send_message(
@@ -208,37 +216,51 @@ async def check_and_deliver(order: dict):
         )
         return
 
-    if not ready_item:
-        return  # todavia se esta generando/transmitiendo - no esta lista de verdad
+    if pendientes > 0 or not ready_items:
+        return  # todavia falta alguna variante por terminar de generar
 
-    audio_url = ready_item["audio_url"]
-
-    enviado_ok = await send_document_by_url(
-        order["chat_id"],
-        audio_url,
-        caption="🎵 ¡Tu canción personalizada está lista!",
-        title=order.get("final_title") or "Tu canción",
-    )
-    if not enviado_ok:
-        # Telegram rechazo el archivo (por ejemplo, 400 porque la URL
-        # todavia no es un archivo completo y valido). NO marcamos como
-        # entregado - asi el loop de polling lo vuelve a intentar solo en
-        # 20 segundos, sin que nadie tenga que hacer nada manualmente.
-        log.warning(
-            "Telegram rechazo el archivo de Suno para chat_id=%s, se reintentara solo.",
-            order["chat_id"],
+    # Ya estan todas las variantes que van a estar listas - se entregan todas.
+    titulo = order.get("final_title") or "Tu canción"
+    entregadas_ok = 0
+    for idx, item in enumerate(ready_items, start=1):
+        audio_url = item["audio_url"]
+        multiple = len(ready_items) > 1
+        caption = (
+            f"🎵 ¡Tu canción está lista! (Versión {idx} de {len(ready_items)})"
+            if multiple
+            else "🎵 ¡Tu canción personalizada está lista!"
         )
+        enviado_ok = await send_document_by_url(
+            order["chat_id"],
+            audio_url,
+            caption=caption,
+            title=f"{titulo} (v{idx})" if multiple else titulo,
+        )
+        if not enviado_ok:
+            log.warning(
+                "Telegram rechazo la variante %d de Suno para chat_id=%s, se reintentara solo.",
+                idx, order["chat_id"],
+            )
+            continue
+
+        entregadas_ok += 1
+        # Ademas del reproductor, mandamos el link directo como texto. El
+        # reproductor de audio de Telegram no siempre deja claro como
+        # descargar (en desktop hace falta click derecho, y no todos lo
+        # saben) - un link de texto es inequivoco.
+        etiqueta_version = f" (Versión {idx})" if multiple else ""
+        await send_message(
+            order["chat_id"],
+            f"👇 Descarga directa{etiqueta_version}:\n{audio_url}",
+        )
+
+    if entregadas_ok < len(ready_items):
+        # Al menos una variante no se pudo mandar - NO marcamos como
+        # entregado, asi el loop de polling reintenta TODAS de nuevo en 20
+        # segundos (puede duplicar alguna que si se mando bien, pero es
+        # preferible a dejar al cliente sin una de sus 2 versiones).
         return
 
-    # Ademas del reproductor, mandamos el link directo como texto. El
-    # reproductor de audio de Telegram no siempre deja claro como descargar
-    # (en desktop hace falta click derecho, y no todos lo saben) - un link de
-    # texto es inequivoco: se toca/clickea y listo, se abre o descarga solo.
-    await send_message(
-        order["chat_id"],
-        "👇 Si quieres descargarla directo a tu teléfono o computadora, toca este link:\n"
-        f"{audio_url}",
-    )
     # CRITICO: hay que mover el step a "entregado" ademas de marcar delivered=1.
     # Si no, el pedido se queda "generando" para siempre y cualquier mensaje
     # posterior del cliente (incluso un simple "gracias") recibe la respuesta

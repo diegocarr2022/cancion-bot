@@ -235,6 +235,27 @@ async def continuar_charla_pago(chat_id: int, text: str):
     )
 
 
+def _separar_estilo_de_letra(lyric: str, style: str) -> tuple[str, str]:
+    """Red de seguridad: a veces Claude deja pegada al principio de la letra
+    una descripcion del estilo (ej. "Estilo emocional, voz desgarrada...")
+    en vez de usar el campo 'style' aparte, y Suno termina "cantando" esa
+    descripcion literalmente. Si detectamos texto antes de la primera
+    etiqueta de seccion (el primer "["), lo sacamos de la letra y lo
+    sumamos al estilo."""
+    idx = lyric.find("[")
+    if idx > 0:
+        prefijo = lyric[:idx].strip(" \n:-")
+        if prefijo:
+            log.warning(
+                "Se detecto una descripcion de estilo pegada al inicio de la letra, "
+                "se corrigio automaticamente: %r",
+                prefijo,
+            )
+            lyric = lyric[idx:].lstrip()
+            style = f"{style} {prefijo}".strip() if style else prefijo
+    return lyric, style
+
+
 async def continuar_charla_cancion(chat_id: int, text: str):
     """Etapa 2: ya pagado - Claude arma la letra con el cliente."""
 
@@ -242,18 +263,16 @@ async def continuar_charla_cancion(chat_id: int, text: str):
         if name != "finalizar_letra":
             return "Herramienta desconocida."
 
-        db.save_final_letra(
-            chat_id,
-            tool_input.get("title", ""),
-            tool_input.get("style", ""),
-            tool_input.get("lyric", ""),
-        )
+        title = tool_input.get("title", "")
+        style = tool_input.get("style", "")
+        lyric = tool_input.get("lyric", "")
+        lyric, style = _separar_estilo_de_letra(lyric, style)
+
+        db.save_final_letra(chat_id, title, style, lyric)
         db.update_order(chat_id, step="generando")
 
         try:
-            result = await generate_custom_song(
-                lyric=tool_input["lyric"], title=tool_input["title"], style=tool_input["style"]
-            )
+            result = await generate_custom_song(lyric=lyric, title=title, style=style)
             task_id = result.get("task_id") or result.get("id")
             db.update_order(chat_id, suno_task_id=task_id)
             return "La canción se está generando correctamente."

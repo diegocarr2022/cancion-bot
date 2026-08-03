@@ -144,6 +144,13 @@ Reglas importantes (MUY IMPORTANTE, no las rompas):
 - Responde siempre en espanol.
 - NO llames a finalizar_letra hasta que el cliente haya aprobado
   explicitamente la letra que le mostraste.
+- CRITICO: el campo "lyric" de finalizar_letra tiene que contener
+  UNICAMENTE la letra cantable, empezando directo con "[Verso 1]". NUNCA
+  pongas ahi la descripcion del estilo (frases como "Estilo emocional, voz
+  desgarrada", "genero: balada", etc.) - esa descripcion va SIEMPRE y
+  UNICAMENTE en el campo separado "style". Si mezclas ambas cosas en
+  "lyric", Suno canta literalmente la descripcion del estilo como si fuera
+  parte de la cancion, lo cual arruina el resultado.
 """
 
 # ---------------------------------------------------------------------------
@@ -222,8 +229,13 @@ CONTENT_TOOLS = [
                 },
                 "lyric": {
                     "type": "string",
-                    "description": "Letra completa final, con estructura [Verso 1] [Pre-Coro] "
-                                    "[Coro] [Verso 2] [Pre-Coro] [Coro] [Puente] [Coro final]",
+                    "description": "SOLO la letra cantable final, empezando directo con "
+                                    "'[Verso 1]', con estructura [Verso 1] [Pre-Coro] [Coro] "
+                                    "[Verso 2] [Pre-Coro] [Coro] [Puente] [Coro final]. NUNCA "
+                                    "incluyas aca la descripcion del estilo musical (eso va "
+                                    "unicamente en el campo 'style') - si la letra empieza con "
+                                    "algo como 'Estilo emocional, voz desgarrada...' en vez de "
+                                    "'[Verso 1]', esta mal armada.",
                 },
             },
             "required": ["title", "style", "lyric"],
