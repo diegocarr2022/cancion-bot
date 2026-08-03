@@ -1,11 +1,13 @@
 import asyncio
 import logging
+import secrets
 
-from fastapi import FastAPI, Request, Header, HTTPException
+from fastapi import FastAPI, Request, Header, HTTPException, Depends
 from fastapi.responses import HTMLResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from app import db
-from app.config import TELEGRAM_WEBHOOK_SECRET, BASE_URL, ADMIN_CHAT_ID
+from app.config import TELEGRAM_WEBHOOK_SECRET, BASE_URL, ADMIN_CHAT_ID, ADMIN_PANEL_PASSWORD
 from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
 from app.payment_confirm import confirmar_pago
@@ -66,6 +68,115 @@ async def pago_exitoso():
         <h1>🎵 ¡Pago recibido!</h1>
         <p>Ya puedes volver a Telegram para seguir con tu canción.</p>
         {boton}
+      </body>
+    </html>
+    """
+
+
+# ---------------------------------------------------------------------------
+# Panel de admin: resumen de ventas y lista de pedidos, protegido con
+# contrasena (HTTP Basic Auth). El usuario no importa, solo la contrasena
+# (ADMIN_PANEL_PASSWORD). Si esa variable no esta configurada, el panel
+# devuelve 404 - preferimos que quede invisible/deshabilitado por defecto en
+# vez de exponerlo sin proteccion por accidente.
+# ---------------------------------------------------------------------------
+_basic_auth = HTTPBasic()
+
+
+def _verificar_admin(credentials: HTTPBasicCredentials = Depends(_basic_auth)):
+    if not ADMIN_PANEL_PASSWORD:
+        raise HTTPException(status_code=404)
+    # compare_digest evita timing attacks al comparar la contrasena
+    if not secrets.compare_digest(credentials.password, ADMIN_PANEL_PASSWORD):
+        raise HTTPException(
+            status_code=401,
+            detail="Contraseña incorrecta",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return True
+
+
+_ESTADO_LABELS = {
+    "creando_pago": ("Creando pago", "#9ca3af"),
+    "esperando_pago": ("Esperando pago", "#f59e0b"),
+    "pago_fallido": ("Pago fallido", "#ef4444"),
+    "charlando": ("Armando la letra", "#3b82f6"),
+    "generando": ("Generando canción", "#8b5cf6"),
+    "entregado": ("Entregado ✅", "#22c55e"),
+}
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_panel(_: bool = Depends(_verificar_admin)):
+    stats = db.get_stats()
+    orders = db.get_all_orders(limit=300)
+
+    filas = ""
+    for o in orders:
+        label, color = _ESTADO_LABELS.get(o["step"], (o["step"], "#9ca3af"))
+        monto = f"${o['amount_mxn']:.0f}" if o.get("amount_mxn") else "—"
+        titulo = o.get("final_title") or "—"
+        filas += f"""
+        <tr>
+          <td>{o['chat_id']}</td>
+          <td>{titulo}</td>
+          <td><span style="background:{color}22; color:{color}; padding:3px 10px;
+              border-radius:999px; font-size:13px; font-weight:600;">{label}</span></td>
+          <td>{monto}</td>
+          <td style="color:#6b7280; font-size:13px;">{o['created_at'][:16].replace('T', ' ')}</td>
+        </tr>
+        """
+
+    return f"""
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Panel de ventas — Cancion Bot</title>
+        <style>
+          body {{ font-family: -apple-system, system-ui, sans-serif; background:#f9fafb;
+                  color:#111827; margin:0; padding:32px 24px; }}
+          h1 {{ font-size:22px; margin-bottom:24px; }}
+          .cards {{ display:flex; gap:16px; flex-wrap:wrap; margin-bottom:32px; }}
+          .card {{ background:white; border-radius:12px; padding:18px 22px;
+                    box-shadow:0 1px 3px rgba(0,0,0,0.08); min-width:150px; }}
+          .card .label {{ font-size:13px; color:#6b7280; margin-bottom:6px; }}
+          .card .value {{ font-size:26px; font-weight:700; }}
+          table {{ width:100%; border-collapse:collapse; background:white;
+                    border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.08); }}
+          th {{ text-align:left; font-size:12px; text-transform:uppercase; color:#6b7280;
+                padding:12px 16px; border-bottom:1px solid #e5e7eb; }}
+          td {{ padding:12px 16px; border-bottom:1px solid #f3f4f6; font-size:14px; }}
+          tr:last-child td {{ border-bottom:none; }}
+        </style>
+      </head>
+      <body>
+        <h1>🎵 Panel de ventas — Cancion Bot</h1>
+        <div class="cards">
+          <div class="card"><div class="label">Ingresos totales</div>
+            <div class="value">${stats['ingresos_mxn']:.0f} MXN</div></div>
+          <div class="card"><div class="label">Ingresos hoy</div>
+            <div class="value">${stats['ingresos_hoy_mxn']:.0f} MXN</div></div>
+          <div class="card"><div class="label">Pedidos pagados</div>
+            <div class="value">{stats['pagados']}</div></div>
+          <div class="card"><div class="label">Entregados</div>
+            <div class="value">{stats['entregados']}</div></div>
+          <div class="card"><div class="label">En curso (pagado, sin entregar)</div>
+            <div class="value">{stats['en_curso']}</div></div>
+          <div class="card"><div class="label">Esperando pago</div>
+            <div class="value">{stats['esperando_pago']}</div></div>
+          <div class="card"><div class="label">Pagos fallidos</div>
+            <div class="value">{stats['fallidos']}</div></div>
+          <div class="card"><div class="label">Total de pedidos</div>
+            <div class="value">{stats['total']}</div></div>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Chat ID</th><th>Canción</th><th>Estado</th><th>Monto</th><th>Creado</th></tr>
+          </thead>
+          <tbody>
+            {filas or '<tr><td colspan="5" style="text-align:center; color:#9ca3af;">Sin pedidos todavía</td></tr>'}
+          </tbody>
+        </table>
       </body>
     </html>
     """

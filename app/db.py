@@ -48,6 +48,11 @@ MIGRATIONS = [
     "ALTER TABLE orders ADD COLUMN final_title TEXT",
     "ALTER TABLE orders ADD COLUMN final_style TEXT",
     "ALTER TABLE orders ADD COLUMN final_lyric TEXT",
+    # Guarda el precio real (MXN) que se le cobro a ESTE pedido en particular
+    # al momento de generar el link de pago - asi el panel de admin puede
+    # calcular ingresos reales incluso si el precio cambio con el tiempo
+    # (en vez de asumir el precio actual para pedidos viejos).
+    "ALTER TABLE orders ADD COLUMN amount_mxn REAL",
 ]
 
 
@@ -160,6 +165,51 @@ def find_pending_payments():
             "SELECT * FROM orders WHERE paid = 0 AND payment_request_id IS NOT NULL"
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def get_all_orders(limit: int = 300):
+    """Todos los pedidos, mas recientes primero - para el panel de admin."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM orders ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_stats():
+    """Resumen agregado para el panel de admin: ventas, ingresos, embudo."""
+    with get_conn() as conn:
+        total = conn.execute("SELECT COUNT(*) AS n FROM orders").fetchone()["n"]
+        pagados = conn.execute("SELECT COUNT(*) AS n FROM orders WHERE paid = 1").fetchone()["n"]
+        entregados = conn.execute(
+            "SELECT COUNT(*) AS n FROM orders WHERE step = 'entregado'"
+        ).fetchone()["n"]
+        en_curso = conn.execute(
+            "SELECT COUNT(*) AS n FROM orders WHERE paid = 1 AND step != 'entregado'"
+        ).fetchone()["n"]
+        esperando_pago = conn.execute(
+            "SELECT COUNT(*) AS n FROM orders WHERE paid = 0 AND payment_request_id IS NOT NULL"
+        ).fetchone()["n"]
+        fallidos = conn.execute(
+            "SELECT COUNT(*) AS n FROM orders WHERE step = 'pago_fallido'"
+        ).fetchone()["n"]
+        ingresos = conn.execute(
+            "SELECT COALESCE(SUM(amount_mxn), 0) AS total FROM orders WHERE paid = 1"
+        ).fetchone()["total"]
+        ingresos_hoy = conn.execute(
+            "SELECT COALESCE(SUM(amount_mxn), 0) AS total FROM orders "
+            "WHERE paid = 1 AND date(updated_at) = date('now')"
+        ).fetchone()["total"]
+        return {
+            "total": total,
+            "pagados": pagados,
+            "entregados": entregados,
+            "en_curso": en_curso,
+            "esperando_pago": esperando_pago,
+            "fallidos": fallidos,
+            "ingresos_mxn": ingresos or 0,
+            "ingresos_hoy_mxn": ingresos_hoy or 0,
+        }
 
 
 def find_stuck_generation(older_than_seconds: int = 900):

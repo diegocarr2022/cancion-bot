@@ -176,6 +176,10 @@ async def generar_link_pago(chat_id: int, avisar_admin: bool = False) -> str | N
         step="esperando_pago",
         payment_url=payment["redirect_url"],
         payment_request_id=payment["id"],
+        # Guardamos el precio real de ESTE pedido (no solo el actual) para
+        # que el panel de admin calcule ingresos correctos aunque el precio
+        # cambie mas adelante.
+        amount_mxn=PRECIO_MXN,
     )
     await send_message(
         chat_id,

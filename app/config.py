@@ -28,3 +28,9 @@ PRECIO_TEXTO = os.environ.get("PRECIO_TEXTO", "$197 MXN")
 ADMIN_CHAT_ID = int(os.environ["ADMIN_CHAT_ID"])
 
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+
+# Contraseña para entrar al panel de admin en /admin (ver main.py). El
+# usuario no importa (podes poner cualquier cosa al loguearte), solo se
+# valida la contraseña. Si no la configuras, el panel queda deshabilitado
+# por seguridad (nunca lo dejamos abierto por defecto).
+ADMIN_PANEL_PASSWORD = os.environ.get("ADMIN_PANEL_PASSWORD", "")
