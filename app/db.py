@@ -38,6 +38,17 @@ CREATE TABLE IF NOT EXISTS orders (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_payment_request_id ON orders(payment_request_id);
+
+-- Cada fila es un clic real al link intermedio /ir/<source> (ver main.py),
+-- ANTES de que la persona llegue a Telegram. Esto nos deja medir cuanta
+-- gente realmente hizo clic en el anuncio, independiente de si despues
+-- abrio Telegram y presiono "Iniciar" o no (Telegram no nos avisa de eso -
+-- ver el "source" en orders para ese siguiente paso del embudo).
+CREATE TABLE IF NOT EXISTS clicks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 # Migraciones simples para bases de datos que ya existian con el esquema
@@ -53,6 +64,11 @@ MIGRATIONS = [
     # calcular ingresos reales incluso si el precio cambio con el tiempo
     # (en vez de asumir el precio actual para pedidos viejos).
     "ALTER TABLE orders ADD COLUMN amount_mxn REAL",
+    # De donde vino este pedido (marketplace, instagram, tiktok, google, etc.)
+    # - se llena a partir del parametro ?start=<source> del deep link de
+    # Telegram (ver conversation.py). NULL si el cliente escribio /start a
+    # secas, sin venir de ningun link con tracking.
+    "ALTER TABLE orders ADD COLUMN source TEXT",
 ]
 
 
@@ -83,7 +99,7 @@ def get_order(chat_id: int):
         return dict(row) if row else None
 
 
-def create_order(chat_id: int):
+def create_order(chat_id: int, source: str | None = None):
     """Crea un pedido nuevo para este chat_id. IMPORTANTE: un cliente tiene
     que poder comprar mas de una vez. Como chat_id sigue siendo la clave
     unica de la fila (un pedido "activo" a la vez por chat), si ya existia
@@ -91,13 +107,17 @@ def create_order(chat_id: int):
     step="entregado") lo REINICIA por completo - borra letra final, datos de
     pago, historial de mensajes, etc. - para que arranque una compra nueva
     de cero. Esto solo debe llamarse cuando no hay un pedido en curso
-    (ver el chequeo en conversation.py antes de llamar a esta funcion)."""
+    (ver el chequeo en conversation.py antes de llamar a esta funcion).
+
+    source: de donde vino este pedido (marketplace, instagram, etc.), sacado
+    del parametro ?start=<source> del deep link de Telegram. None si el
+    cliente escribio /start a secas."""
     now = datetime.utcnow().isoformat()
     with get_conn() as conn:
         conn.execute(
             """
-            INSERT INTO orders (chat_id, step, messages, created_at, updated_at)
-            VALUES (?, 'creando_pago', '[]', ?, ?)
+            INSERT INTO orders (chat_id, step, messages, source, created_at, updated_at)
+            VALUES (?, 'creando_pago', '[]', ?, ?, ?)
             ON CONFLICT(chat_id) DO UPDATE SET
                 step = 'creando_pago',
                 messages = '[]',
@@ -109,10 +129,65 @@ def create_order(chat_id: int):
                 paid = 0,
                 suno_task_id = NULL,
                 delivered = 0,
+                source = excluded.source,
                 updated_at = excluded.updated_at
             """,
-            (chat_id, now, now),
+            (chat_id, source, now, now),
         )
+
+
+def log_click(source: str):
+    """Registra un clic real al link intermedio /ir/<source>, ANTES de que
+    la persona llegue a Telegram (ver main.py). Esta es la unica forma de
+    saber cuanta gente hizo clic de verdad, ya que Telegram no avisa cuando
+    alguien abre el chat sin presionar 'Iniciar'."""
+    now = datetime.utcnow().isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO clicks (source, created_at) VALUES (?, ?)", (source, now)
+        )
+
+
+def get_click_stats():
+    """Clics por canal, y cuantos de esos canales efectivamente llegaron a
+    iniciar un pedido en Telegram (con ese mismo source) - para comparar
+    'clics reales' vs 'gente que de verdad abrio el bot'."""
+    with get_conn() as conn:
+        clicks_rows = conn.execute(
+            "SELECT source, COUNT(*) AS n FROM clicks GROUP BY source ORDER BY n DESC"
+        ).fetchall()
+        starts_rows = conn.execute(
+            "SELECT source, COUNT(*) AS n, SUM(paid) AS pagados, "
+            "COALESCE(SUM(CASE WHEN paid = 1 THEN amount_mxn ELSE 0 END), 0) AS ingresos "
+            "FROM orders WHERE source IS NOT NULL GROUP BY source"
+        ).fetchall()
+        starts_by_source = {r["source"]: dict(r) for r in starts_rows}
+
+        resultado = []
+        vistos = set()
+        for r in clicks_rows:
+            source = r["source"]
+            vistos.add(source)
+            starts = starts_by_source.get(source, {"n": 0, "pagados": 0, "ingresos": 0})
+            resultado.append({
+                "source": source,
+                "clics": r["n"],
+                "inicios_telegram": starts["n"],
+                "pagados": starts["pagados"] or 0,
+                "ingresos_mxn": starts["ingresos"] or 0,
+            })
+        # por si hay ordenes con un source que nunca paso por /ir/<source>
+        # (por ejemplo si alguien comparte el link de Telegram directo)
+        for source, starts in starts_by_source.items():
+            if source not in vistos:
+                resultado.append({
+                    "source": source,
+                    "clics": 0,
+                    "inicios_telegram": starts["n"],
+                    "pagados": starts["pagados"] or 0,
+                    "ingresos_mxn": starts["ingresos"] or 0,
+                })
+        return resultado
 
 
 def update_order(chat_id: int, **fields):

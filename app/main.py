@@ -2,8 +2,10 @@ import asyncio
 import logging
 import secrets
 
+import re
+
 from fastapi import FastAPI, Request, Header, HTTPException, Depends
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from app import db
@@ -60,6 +62,30 @@ async def startup():
 @app.get("/")
 async def health():
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Link intermedio de tracking: en vez de poner en tus anuncios el link de
+# Telegram directo, poné https://tu-app.onrender.com/ir/<source> (ej.
+# /ir/marketplace, /ir/instagram, /ir/tiktok). Esto registra el clic REAL
+# (Telegram no nos avisa si alguien abre el chat sin presionar "Iniciar",
+# asi que esta es la unica forma de medir eso) y despues redirige a Telegram
+# ya con el origen etiquetado, para que quede guardado en el pedido si la
+# persona llega a escribirle al bot.
+# ---------------------------------------------------------------------------
+_SOURCE_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
+
+
+@app.get("/ir/{source}")
+async def ir_a_telegram(source: str):
+    if not _SOURCE_RE.match(source):
+        raise HTTPException(status_code=400, detail="Origen invalido")
+    if not BOT_USERNAME:
+        raise HTTPException(status_code=503, detail="Bot todavia no esta listo")
+
+    db.log_click(source)
+    log.info("[/ir/%s] clic registrado", source)
+    return RedirectResponse(url=f"https://t.me/{BOT_USERNAME}?start={source}", status_code=302)
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +155,20 @@ _ESTADO_LABELS = {
 async def admin_panel(_: bool = Depends(_verificar_admin)):
     stats = db.get_stats()
     orders = db.get_all_orders(limit=300)
+    canales = db.get_click_stats()
+
+    filas_canales = ""
+    for c in canales:
+        tasa_inicio = f"{(c['inicios_telegram'] / c['clics'] * 100):.0f}%" if c["clics"] else "—"
+        filas_canales += f"""
+        <tr>
+          <td><strong>{c['source']}</strong></td>
+          <td>{c['clics']}</td>
+          <td>{c['inicios_telegram']} <span style="color:#9ca3af; font-size:12px;">({tasa_inicio})</span></td>
+          <td>{c['pagados']}</td>
+          <td>${c['ingresos_mxn']:.0f} MXN</td>
+        </tr>
+        """
 
     filas = ""
     for o in orders:
@@ -188,6 +228,18 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
           <div class="card"><div class="label">Total de pedidos</div>
             <div class="value">{stats['total']}</div></div>
         </div>
+
+        <h2 style="font-size:16px; margin: 32px 0 12px;">📊 Por canal (link de tracking /ir/&lt;origen&gt;)</h2>
+        <table style="margin-bottom:32px;">
+          <thead>
+            <tr><th>Canal</th><th>Clics reales</th><th>Iniciaron en Telegram</th>
+                <th>Pagaron</th><th>Ingresos</th></tr>
+          </thead>
+          <tbody>
+            {filas_canales or '<tr><td colspan="5" style="text-align:center; color:#9ca3af;">Todavía no hay clics registrados con /ir/&lt;origen&gt;</td></tr>'}
+          </tbody>
+        </table>
+
         <table>
           <thead>
             <tr><th>Chat ID</th><th>Canción</th><th>Estado</th><th>Monto</th><th>Creado</th></tr>

@@ -91,7 +91,14 @@ async def handle_message(chat_id: int, text: str):
         return
 
     order = db.get_order(chat_id)
-    is_start = text.strip().lower() in ("/start", "/inicio")
+    # Telegram manda el parametro ?start=<source> del deep link como parte
+    # del propio texto del comando, ej: "/start marketplace". Lo separamos
+    # aca para poder guardar de que canal vino el pedido (ver /ir/<source>
+    # en main.py).
+    partes_texto = text.strip().split(maxsplit=1)
+    comando = partes_texto[0].lower() if partes_texto else ""
+    source = partes_texto[1].strip() if len(partes_texto) > 1 else None
+    is_start = comando in ("/start", "/inicio")
 
     # Si el pedido esta pagado pero TODAVIA EN CURSO (no entregado), /start
     # NUNCA debe reiniciarlo - solo lo mandamos a seguir donde estaba. Este
@@ -117,7 +124,7 @@ async def handle_message(chat_id: int, text: str):
     # comprar otra - db.create_order reinicia el pedido por completo en ese
     # caso, asi que cada compra arranca limpia.
     if is_start or order is None:
-        db.create_order(chat_id)
+        db.create_order(chat_id, source=source)
         await send_message(chat_id, INTRO_TEXT)
         await generar_link_pago(chat_id, avisar_admin=True)
         return
