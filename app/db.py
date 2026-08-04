@@ -47,6 +47,10 @@ CREATE INDEX IF NOT EXISTS idx_payment_request_id ON orders(payment_request_id);
 CREATE TABLE IF NOT EXISTS clicks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source TEXT NOT NULL,
+    user_agent TEXT,
+    ip TEXT,
+    fbclid TEXT,
+    is_bot INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
 """
@@ -69,6 +73,17 @@ MIGRATIONS = [
     # Telegram (ver conversation.py). NULL si el cliente escribio /start a
     # secas, sin venir de ningun link con tracking.
     "ALTER TABLE orders ADD COLUMN source TEXT",
+    # Para poder filtrar clics que en realidad son bots/crawlers (de Meta,
+    # Telegram, etc. generando la vista previa del link) en vez de personas
+    # reales - ver _es_probable_bot() en este mismo archivo.
+    "ALTER TABLE clicks ADD COLUMN user_agent TEXT",
+    "ALTER TABLE clicks ADD COLUMN ip TEXT",
+    "ALTER TABLE clicks ADD COLUMN is_bot INTEGER NOT NULL DEFAULT 0",
+    # fbclid: Facebook SOLO lo agrega cuando una persona real toca el link
+    # dentro de la app/sitio de Facebook - los crawlers que generan la vista
+    # previa piden la URL "pelona" del anuncio, sin este parametro. Es la
+    # senal mas confiable que tenemos de que un clic es humano de verdad.
+    "ALTER TABLE clicks ADD COLUMN fbclid TEXT",
 ]
 
 
@@ -136,25 +151,66 @@ def create_order(chat_id: int, source: str | None = None):
         )
 
 
-def log_click(source: str):
+# Fragmentos de user-agent tipicos de bots/crawlers (de Meta generando la
+# vista previa del link al guardar el anuncio, de Telegram haciendo lo
+# mismo, de escaneres de seguridad, etc.) - si el user-agent contiene
+# cualquiera de estos, NO es una persona real haciendo clic.
+_BOT_UA_HINTS = (
+    "facebookexternalhit", "facebookcatalog", "meta-externalagent",
+    "telegrambot", "bot", "crawl", "spider", "preview", "curl",
+    "python-requests", "wget", "headless", "monitor", "uptime", "pingdom",
+    "slurp", "bingpreview", "whatsapp",
+)
+
+
+def _es_probable_bot(user_agent: str | None) -> bool:
+    if not user_agent:
+        return True  # nadie con un navegador real manda un User-Agent vacio
+    ua = user_agent.lower()
+    return any(hint in ua for hint in _BOT_UA_HINTS)
+
+
+def log_click(
+    source: str,
+    user_agent: str | None = None,
+    ip: str | None = None,
+    fbclid: str | None = None,
+):
     """Registra un clic real al link intermedio /ir/<source>, ANTES de que
     la persona llegue a Telegram (ver main.py). Esta es la unica forma de
     saber cuanta gente hizo clic de verdad, ya que Telegram no avisa cuando
-    alguien abre el chat sin presionar 'Iniciar'."""
+    alguien abre el chat sin presionar 'Iniciar'.
+
+    IMPORTANTE: guardamos TODOS los clics (incluidos los de bots) para no
+    perder informacion, pero marcamos is_bot para poder filtrarlos despues -
+    Meta/Telegram/WhatsApp mandan sus propios crawlers a "visitar" el link
+    apenas se guarda o se comparte un anuncio, generando clics falsos que no
+    son personas reales.
+
+    fbclid: Facebook lo agrega al link desde que lo sirve/envuelve, no solo
+    cuando una persona hace clic - por eso los propios bots de revision de
+    anuncios de Facebook TAMBIEN pueden traerlo. No es prueba de humano, asi
+    que lo guardamos solo como dato de referencia y NO lo usamos para decidir
+    is_bot. La clasificacion real sigue siendo por User-Agent."""
     now = datetime.utcnow().isoformat()
+    is_bot = _es_probable_bot(user_agent)
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO clicks (source, created_at) VALUES (?, ?)", (source, now)
+            "INSERT INTO clicks (source, user_agent, ip, fbclid, is_bot, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (source, user_agent, ip, fbclid, int(is_bot), now),
         )
 
 
 def get_click_stats():
-    """Clics por canal, y cuantos de esos canales efectivamente llegaron a
-    iniciar un pedido en Telegram (con ese mismo source) - para comparar
-    'clics reales' vs 'gente que de verdad abrio el bot'."""
+    """Clics por canal (solo los que parecen personas reales, no bots), y
+    cuantos de esos canales efectivamente llegaron a iniciar un pedido en
+    Telegram (con ese mismo source) - para comparar 'clics reales' vs 'gente
+    que de verdad abrio el bot'."""
     with get_conn() as conn:
         clicks_rows = conn.execute(
-            "SELECT source, COUNT(*) AS n FROM clicks GROUP BY source ORDER BY n DESC"
+            "SELECT source, COUNT(*) AS n FROM clicks WHERE is_bot = 0 "
+            "GROUP BY source ORDER BY n DESC"
         ).fetchall()
         starts_rows = conn.execute(
             "SELECT source, COUNT(*) AS n, SUM(paid) AS pagados, "
@@ -188,6 +244,15 @@ def get_click_stats():
                     "ingresos_mxn": starts["ingresos"] or 0,
                 })
         return resultado
+
+
+def get_bot_clicks_total() -> int:
+    """Cuantos clics se filtraron por parecer bots/crawlers - solo para
+    mostrar en el panel de admin como referencia, asi no parece que los
+    datos "desaparecen" sin explicacion."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT COUNT(*) AS n FROM clicks WHERE is_bot = 1").fetchone()
+        return row["n"]
 
 
 def update_order(chat_id: int, **fields):

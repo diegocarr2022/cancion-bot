@@ -77,14 +77,20 @@ _SOURCE_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
 
 
 @app.get("/ir/{source}")
-async def ir_a_telegram(source: str):
+async def ir_a_telegram(source: str, request: Request):
     if not _SOURCE_RE.match(source):
         raise HTTPException(status_code=400, detail="Origen invalido")
     if not BOT_USERNAME:
         raise HTTPException(status_code=503, detail="Bot todavia no esta listo")
 
-    db.log_click(source)
-    log.info("[/ir/%s] clic registrado", source)
+    user_agent = request.headers.get("user-agent", "")
+    ip = request.client.host if request.client else None
+    fbclid = request.query_params.get("fbclid")
+    db.log_click(source, user_agent=user_agent, ip=ip, fbclid=fbclid)
+    log.info(
+        "[/ir/%s] clic registrado (ip=%s, ua=%s, fbclid=%s)",
+        source, ip, user_agent, fbclid,
+    )
     return RedirectResponse(url=f"https://t.me/{BOT_USERNAME}?start={source}", status_code=302)
 
 
@@ -156,6 +162,7 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
     stats = db.get_stats()
     orders = db.get_all_orders(limit=300)
     canales = db.get_click_stats()
+    bots_filtrados = db.get_bot_clicks_total()
 
     filas_canales = ""
     for c in canales:
@@ -229,7 +236,12 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
             <div class="value">{stats['total']}</div></div>
         </div>
 
-        <h2 style="font-size:16px; margin: 32px 0 12px;">📊 Por canal (link de tracking /ir/&lt;origen&gt;)</h2>
+        <h2 style="font-size:16px; margin: 32px 0 4px;">📊 Por canal (link de tracking /ir/&lt;origen&gt;)</h2>
+        <p style="font-size:12px; color:#9ca3af; margin:0 0 12px;">
+          Ya se filtraron {bots_filtrados} clic(s) que parecían bots/crawlers
+          (de Meta, Telegram, etc. generando la vista previa del link) - no
+          son personas reales, no están contados abajo.
+        </p>
         <table style="margin-bottom:32px;">
           <thead>
             <tr><th>Canal</th><th>Clics reales</th><th>Iniciaron en Telegram</th>
