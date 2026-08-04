@@ -23,6 +23,21 @@ app = FastAPI(title="Cancion Bot")
 # poder armar el link t.me/... del boton de la pagina de pago exitoso.
 BOT_USERNAME = ""
 
+# IMPORTANTE: asyncio solo guarda una referencia DEBIL a las tareas creadas
+# con asyncio.create_task(). Si no guardamos nosotros mismos una referencia
+# fuerte en algun lado, el recolector de basura de Python puede destruir la
+# tarea en cualquier momento SIN ningun error ni log - el loop de background
+# simplemente deja de correr en silencio. Por eso guardamos todas las tareas
+# de fondo aca, para que nunca se recolecten mientras el proceso este vivo.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn(coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
 
 @app.on_event("startup")
 async def startup():
@@ -33,9 +48,13 @@ async def startup():
         log.info("Telegram setWebhook: %s", result)
     me = await get_me()
     BOT_USERNAME = me.get("username", "")
-    asyncio.create_task(poll_suno_tasks_loop())
-    asyncio.create_task(poll_pending_payments_loop())
-    asyncio.create_task(poll_stuck_generation_loop())
+    _spawn(poll_suno_tasks_loop())
+    _spawn(poll_pending_payments_loop())
+    _spawn(poll_stuck_generation_loop())
+    log.info(
+        "Loops de background arrancados: poll_suno_tasks_loop, "
+        "poll_pending_payments_loop, poll_stuck_generation_loop"
+    )
 
 
 @app.get("/")
@@ -217,7 +236,9 @@ async def telegram_webhook(
     # reenvia el mismo mensaje, y eso puede disparar acciones duplicadas
     # (pagos duplicados, mensajes repetidos). Por eso confirmamos de una
     # vez con {"ok": True} y seguimos procesando en segundo plano.
-    asyncio.create_task(handle_message(chat_id, text))
+    # Usamos _spawn (no asyncio.create_task directo) para que la tarea no
+    # se pierda por garbage collection antes de terminar.
+    _spawn(handle_message(chat_id, text))
     return {"ok": True}
 
 
@@ -261,6 +282,10 @@ async def poll_suno_tasks_loop():
     while True:
         try:
             pending = db.find_unfinished_suno_tasks()
+            # "Latido" visible en el log: confirma que el loop sigue vivo en
+            # cada vuelta, aunque no haya nada pendiente. Sin esto, un log
+            # silencioso por horas se puede confundir con un loop muerto.
+            log.info("[poll_suno_tasks_loop] tick - %d pedido(s) en generacion", len(pending))
             for order in pending:
                 await check_and_deliver(order)
         except Exception:
@@ -390,6 +415,7 @@ async def poll_pending_payments_loop():
     while True:
         try:
             pending = db.find_pending_payments()
+            log.info("[poll_pending_payments_loop] tick - %d pago(s) pendiente(s)", len(pending))
             for order in pending:
                 await check_payment_status(order)
         except Exception:
@@ -434,6 +460,7 @@ async def poll_stuck_generation_loop():
     while True:
         try:
             stuck = db.find_stuck_generation()
+            log.info("[poll_stuck_generation_loop] tick - %d generacion(es) atascada(s)", len(stuck))
             for order in stuck:
                 await reintentar_generacion_automatica(order)
         except Exception:
