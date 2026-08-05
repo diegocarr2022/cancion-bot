@@ -11,7 +11,13 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 
 from app import db
-from app.config import TELEGRAM_WEBHOOK_SECRET, BASE_URL, ADMIN_CHAT_ID, ADMIN_PANEL_PASSWORD
+from app.config import (
+    TELEGRAM_WEBHOOK_SECRET,
+    BASE_URL,
+    ADMIN_CHAT_ID,
+    ADMIN_PANEL_PASSWORD,
+    get_precio_pais,
+)
 from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
 from app.email_client import enviar_cancion_por_correo
@@ -135,10 +141,22 @@ async def web_session(request: Request):
     # (ver web_conversation.py). Aca solo se crea la sesion.
     body = await request.json() if await request.body() else {}
     source = body.get("source")
+    # ?country=<codigo> en el link del anuncio decide el pais/moneda de este
+    # pedido (ver PAISES_SOPORTADOS en config.py) - si no viene, o viene un
+    # codigo no soportado, cae en Mexico por defecto.
+    precio = get_precio_pais(body.get("country"))
+    country_code = (body.get("country") or "").strip().upper() or "MX"
+    if country_code not in ("MX", "PE", "CO"):
+        country_code = "MX"
 
     session_id = uuid.uuid4().hex
-    db.create_web_order(session_id, source=source)
-    log.info("[web] nueva sesion %s (source=%s)", session_id, source)
+    db.create_web_order(
+        session_id, source=source, country=country_code, currency=precio["currency"]
+    )
+    log.info(
+        "[web] nueva sesion %s (source=%s, country=%s, currency=%s)",
+        session_id, source, country_code, precio["currency"],
+    )
     return {"session_id": session_id}
 
 
@@ -279,6 +297,11 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
     bots_filtrados = db.get_bot_clicks_total()
     web_stats = db.get_web_stats()
     web_orders = db.get_all_web_orders(limit=300)
+    # Ingresos web separados por moneda (no se pueden sumar MXN + PEN + COP
+    # como si fueran la misma unidad) - se muestran uno junto al otro.
+    ingresos_web_texto = " + ".join(
+        f"${fila['total']:.0f} {fila['currency']}" for fila in web_stats["ingresos_por_moneda"]
+    ) or "$0"
 
     filas_web = ""
     for o in web_orders:
@@ -286,13 +309,16 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
         monto = f"${o['amount_mxn']:.0f}" if o.get("amount_mxn") else "—"
         nombre = o.get("customer_name") or "—"
         correo = o.get("email") or "—"
+        pais = o.get("country") or "MX"
+        monto_txt = f"{monto} {o.get('currency') or ''}".strip() if o.get("amount_mxn") else "—"
         filas_web += f"""
         <tr>
           <td>{nombre}</td>
           <td>{correo}</td>
+          <td>{pais}</td>
           <td><span style="background:{color}22; color:{color}; padding:3px 10px;
               border-radius:999px; font-size:13px; font-weight:600;">{label}</span></td>
-          <td>{monto}</td>
+          <td>{monto_txt}</td>
           <td style="color:#6b7280; font-size:13px;">{o['created_at'][:16].replace('T', ' ')}</td>
         </tr>
         """
@@ -378,7 +404,7 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
           <div class="card"><div class="label">Entregados</div>
             <div class="value">{web_stats['entregados']}</div></div>
           <div class="card"><div class="label">Ingresos</div>
-            <div class="value">${web_stats['ingresos_mxn']:.0f} MXN</div></div>
+            <div class="value">{ingresos_web_texto}</div></div>
         </div>
         <p style="font-size:12px; color:#9ca3af; margin:-20px 0 12px;">
           Nombre y correo capturados en el chat de la landing - utiles para armar
@@ -386,10 +412,10 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
         </p>
         <table style="margin-bottom:32px;">
           <thead>
-            <tr><th>Nombre</th><th>Correo</th><th>Estado</th><th>Monto</th><th>Creado</th></tr>
+            <tr><th>Nombre</th><th>Correo</th><th>País</th><th>Estado</th><th>Monto</th><th>Creado</th></tr>
           </thead>
           <tbody>
-            {filas_web or '<tr><td colspan="5" style="text-align:center; color:#9ca3af;">Sin pedidos web todavía</td></tr>'}
+            {filas_web or '<tr><td colspan="6" style="text-align:center; color:#9ca3af;">Sin pedidos web todavía</td></tr>'}
           </tbody>
         </table>
 

@@ -145,10 +145,11 @@ async function iniciar() {
   }
 
   const source = params.get("source") || null;
+  const country = params.get("country") || null;
 
   const resp = await fetch("/web/session", {
     method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({source}),
+    body: JSON.stringify({source, country}),
   });
   const data = await resp.json();
   sessionId = data.session_id;

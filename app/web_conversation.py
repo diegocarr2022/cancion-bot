@@ -14,8 +14,8 @@ import logging
 import time
 
 from app import db
-from app.claude_client import send_chat, WEB_CONTENT_SYSTEM_PROMPT, WEB_CONTENT_TOOLS
-from app.config import PRECIO_MXN, BASE_URL
+from app.claude_client import send_chat, build_web_content_system_prompt, WEB_CONTENT_TOOLS
+from app.config import BASE_URL, get_precio_pais
 from app.dlocal_client import create_payment
 
 log = logging.getLogger("cancion-bot")
@@ -41,6 +41,8 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
     order = db.get_web_order(session_id)
     if not order:
         raise ValueError(f"No existe una sesion web con id {session_id}")
+
+    precio = get_precio_pais(order.get("country"))
 
     if order["step"] != "charlando":
         # Ya paso de la etapa de charla (esta esperando pago, generando, o
@@ -86,9 +88,9 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
         order_id = f"web-{session_id}-{int(time.time())}"
         try:
             payment = await create_payment(
-                amount=PRECIO_MXN,
-                currency="MXN",
-                country="MX",
+                amount=precio["amount"],
+                currency=precio["currency"],
+                country=(order.get("country") or "MX"),
                 order_id=order_id,
                 description="Canción personalizada",
                 notification_url=f"{BASE_URL}/dlocal/webhook",
@@ -111,7 +113,7 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
             step="esperando_pago",
             payment_url=payment["redirect_url"],
             payment_request_id=payment["id"],
-            amount_mxn=PRECIO_MXN,
+            amount_mxn=precio["amount"],
         )
         resultado["listo_para_pagar"] = True
         resultado["payment_url"] = payment["redirect_url"]
@@ -129,9 +131,11 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
     else:
         messages.append({"role": "user", "content": text})
 
+    system_prompt = build_web_content_system_prompt(precio["texto"])
+
     for _ in range(MAX_TOOL_ROUNDS):
         try:
-            response = await send_chat(messages, system=WEB_CONTENT_SYSTEM_PROMPT, tools=WEB_CONTENT_TOOLS)
+            response = await send_chat(messages, system=system_prompt, tools=WEB_CONTENT_TOOLS)
         except Exception:
             log.exception("Error hablando con Claude para session_id=%s", session_id)
             resultado["mensajes"].append("Tuve un problema procesando tu mensaje, ¿me lo puedes repetir?")

@@ -217,9 +217,19 @@ DELIVERY_TOOLS = [
 # esta pagado), se le muestra el boton de pago - la generacion en Suno recien
 # arranca cuando se confirma el pago (ver web_conversation.py).
 # ---------------------------------------------------------------------------
-WEB_CONTENT_SYSTEM_PROMPT = """Eres un asistente calido y conversacional que ayuda a crear canciones
+def build_web_content_system_prompt(precio_texto: str) -> str:
+    """El precio varia segun el pais del cliente (ver PAISES_SOPORTADOS en
+    config.py) - por eso el prompt web es una funcion, no un string fijo, asi
+    Claude siempre sabe el precio correcto de ESTE pedido en particular si el
+    cliente pregunta cuanto cuesta."""
+    return _WEB_CONTENT_SYSTEM_PROMPT_TEMPLATE.format(precio_texto=precio_texto)
+
+
+_WEB_CONTENT_SYSTEM_PROMPT_TEMPLATE = """Eres un asistente calido y conversacional que ayuda a crear canciones
 personalizadas por encargo, chateando en la landing web de un negocio de
-canciones personalizadas. El cliente TODAVIA NO PAGO - eso pasa DESPUES de
+canciones personalizadas. El precio de la cancion para este cliente es
+{precio_texto} - si te pregunta cuanto cuesta, respondele con este dato
+exacto. El cliente TODAVIA NO PAGO - eso pasa DESPUES de
 que apruebe la letra, no antes. Tampoco dejo su nombre ni su correo todavia
 - hay que pedirselos vos como parte de la charla. Tu trabajo es:
 

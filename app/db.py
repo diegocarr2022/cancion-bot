@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS web_orders (
     session_id TEXT PRIMARY KEY,
     email TEXT,
     customer_name TEXT,
+    country TEXT NOT NULL DEFAULT 'MX',
+    currency TEXT NOT NULL DEFAULT 'MXN',
     step TEXT NOT NULL DEFAULT 'charlando',
     messages TEXT NOT NULL DEFAULT '[]',
     final_title TEXT,
@@ -120,6 +122,10 @@ MIGRATIONS = [
     # saludo) - junto con el correo, para poder armar audiencias similares
     # (lookalike) en Meta Ads mas adelante.
     "ALTER TABLE web_orders ADD COLUMN customer_name TEXT",
+    # Pais/moneda de este pedido (ver ?country= en app/landing.py y
+    # PAISES_SOPORTADOS en app/config.py) - default Mexico para pedidos viejos.
+    "ALTER TABLE web_orders ADD COLUMN country TEXT NOT NULL DEFAULT 'MX'",
+    "ALTER TABLE web_orders ADD COLUMN currency TEXT NOT NULL DEFAULT 'MXN'",
 ]
 
 
@@ -423,15 +429,22 @@ def get_web_order(session_id: str):
         return dict(row) if row else None
 
 
-def create_web_order(session_id: str, email: str | None = None, source: str | None = None):
+def create_web_order(
+    session_id: str,
+    email: str | None = None,
+    source: str | None = None,
+    country: str = "MX",
+    currency: str = "MXN",
+):
     now = datetime.utcnow().isoformat()
     with get_conn() as conn:
         conn.execute(
             """
-            INSERT INTO web_orders (session_id, email, step, messages, source, created_at, updated_at)
-            VALUES (?, ?, 'charlando', '[]', ?, ?, ?)
+            INSERT INTO web_orders
+                (session_id, email, step, messages, source, country, currency, created_at, updated_at)
+            VALUES (?, ?, 'charlando', '[]', ?, ?, ?, ?, ?)
             """,
-            (session_id, email, source, now, now),
+            (session_id, email, source, country, currency, now, now),
         )
 
 
@@ -486,21 +499,27 @@ def find_pending_web_payments():
 
 def get_web_stats():
     """Resumen chico de la landing web, para mostrar junto al panel de admin
-    de Telegram y no perder visibilidad de este canal nuevo."""
+    de Telegram y no perder visibilidad de este canal nuevo.
+
+    IMPORTANTE: como ahora hay pedidos en distintas monedas (MXN, PEN, COP,
+    etc. - ver PAISES_SOPORTADOS en config.py), los ingresos se agrupan POR
+    MONEDA en vez de sumarse todos juntos en un solo numero - sumar 197 MXN
+    + 37 PEN como si fueran la misma unidad daria un total sin sentido."""
     with get_conn() as conn:
         total = conn.execute("SELECT COUNT(*) AS n FROM web_orders").fetchone()["n"]
         pagados = conn.execute("SELECT COUNT(*) AS n FROM web_orders WHERE paid = 1").fetchone()["n"]
         entregados = conn.execute(
             "SELECT COUNT(*) AS n FROM web_orders WHERE step = 'entregado'"
         ).fetchone()["n"]
-        ingresos = conn.execute(
-            "SELECT COALESCE(SUM(amount_mxn), 0) AS total FROM web_orders WHERE paid = 1"
-        ).fetchone()["total"]
+        ingresos_rows = conn.execute(
+            "SELECT currency, COALESCE(SUM(amount_mxn), 0) AS total FROM web_orders "
+            "WHERE paid = 1 GROUP BY currency"
+        ).fetchall()
         return {
             "total": total,
             "pagados": pagados,
             "entregados": entregados,
-            "ingresos_mxn": ingresos or 0,
+            "ingresos_por_moneda": [dict(r) for r in ingresos_rows],
         }
 
 

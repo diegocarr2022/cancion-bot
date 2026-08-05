@@ -22,6 +22,42 @@ DLOCAL_BASE_URL = (
 PRECIO_MXN = float(os.environ.get("PRECIO_MXN", "197"))
 PRECIO_TEXTO = os.environ.get("PRECIO_TEXTO", "$197 MXN")
 
+# --- Precios por pais (solo landing web - Telegram sigue solo en Mexico) ---
+# Cada pais tiene su propio monto/moneda/texto, configurable por environment
+# (por si cambia el tipo de cambio y hay que ajustar) con un default ya
+# calculado - todos los precios terminan en el digito "7" a proposito (la
+# misma convencion que ya usabamos en Mexico: 197 en vez de 199 - un
+# influencer que vende mucho le recomendo a Diego este patron). El pais se
+# elige con el parametro ?country=<codigo> en el link del anuncio (ver
+# app/landing.py) - sin ese parametro, el default sigue siendo Mexico.
+PAISES_SOPORTADOS = {
+    "MX": {
+        "currency": "MXN",
+        "amount": PRECIO_MXN,
+        "texto": PRECIO_TEXTO,
+    },
+    "PE": {
+        "currency": "PEN",
+        "amount": float(os.environ.get("PRECIO_PEN", "37")),
+        "texto": os.environ.get("PRECIO_TEXTO_PEN", "S/ 37"),
+    },
+    "CO": {
+        "currency": "COP",
+        "amount": float(os.environ.get("PRECIO_COP", "36727")),
+        "texto": os.environ.get("PRECIO_TEXTO_COP", "$36,727 COP"),
+    },
+}
+PAIS_DEFAULT = "MX"
+
+
+def get_precio_pais(country_code: str | None) -> dict:
+    """Devuelve {"currency", "amount", "texto"} para el codigo de pais dado
+    (ej. "PE", "CO", "MX"). Si el codigo no es uno de los soportados (o viene
+    vacio/mal armado), cae de vuelta a Mexico por seguridad - preferimos
+    cobrar en un pais soportado de mas que fallar o cobrar mal."""
+    codigo = (country_code or "").strip().upper()
+    return PAISES_SOPORTADOS.get(codigo, PAISES_SOPORTADOS[PAIS_DEFAULT])
+
 # Tu chat_id de Telegram (el del administrador). Se usa para el comando
 # /confirmar de respaldo (por si el webhook de dLocal Go fallara) y para que
 # te avisen de pedidos nuevos. Lo obtienes hablandole a @userinfobot en Telegram.
