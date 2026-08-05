@@ -56,6 +56,7 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
         title = tool_input.get("title", "")
         style = tool_input.get("style", "")
         lyric = tool_input.get("lyric", "")
+        email = (tool_input.get("email") or "").strip()
         # misma red de seguridad que en Telegram: separar estilo pegado al
         # inicio de la letra si Claude lo mezclo por error.
         idx = lyric.find("[")
@@ -66,6 +67,13 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
                 style = f"{style} {prefijo}".strip() if style else prefijo
 
         db.save_web_final_letra(session_id, title, style, lyric)
+        if email and "@" in email:
+            db.update_web_order(session_id, email=email)
+        else:
+            log.warning(
+                "finalizar_letra (web) llamado sin un correo valido para session_id=%s: %r",
+                session_id, email,
+            )
 
         order_id = f"web-{session_id}-{int(time.time())}"
         try:
