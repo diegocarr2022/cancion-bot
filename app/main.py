@@ -8,6 +8,7 @@ import re
 from fastapi import FastAPI, Request, Header, HTTPException, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.staticfiles import StaticFiles
 
 from app import db
 from app.config import TELEGRAM_WEBHOOK_SECRET, BASE_URL, ADMIN_CHAT_ID, ADMIN_PANEL_PASSWORD
@@ -15,6 +16,7 @@ from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
 from app.email_client import enviar_cancion_por_correo
 from app.landing import LANDING_HTML
+from app.legal import TERMINOS_HTML, PRIVACIDAD_HTML
 from app.payment_confirm import confirmar_pago, confirmar_pago_web
 from app.suno_client import get_task_status, generate_custom_song, extract_ready_items
 from app.telegram_client import send_document_by_url, send_message, set_webhook, get_me
@@ -24,6 +26,7 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("cancion-bot")
 
 app = FastAPI(title="Cancion Bot")
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 # Se llena una vez al arrancar (ver startup) con el username del bot, para
 # poder armar el link t.me/... del boton de la pagina de pago exitoso.
@@ -112,17 +115,30 @@ async def cancion_landing():
     return LANDING_HTML
 
 
+# Requeridas por las politicas de anuncios de Facebook/Google (cualquier
+# landing que pida datos o cobre dinero tiene que enlazar estas paginas).
+@app.get("/terminos", response_class=HTMLResponse)
+async def terminos():
+    return TERMINOS_HTML
+
+
+@app.get("/privacidad", response_class=HTMLResponse)
+async def privacidad():
+    return PRIVACIDAD_HTML
+
+
 @app.post("/web/session")
 async def web_session(request: Request):
-    body = await request.json()
-    email = (body.get("email") or "").strip()
+    # Ya no se pide el correo en una pantalla aparte (era un click extra de
+    # friccion antes de siquiera empezar a chatear) - Claude lo pide el mismo
+    # como parte natural de la charla y lo guarda al llamar finalizar_letra
+    # (ver web_conversation.py). Aca solo se crea la sesion.
+    body = await request.json() if await request.body() else {}
     source = body.get("source")
-    if not email or "@" not in email:
-        raise HTTPException(status_code=400, detail="Correo invalido")
 
     session_id = uuid.uuid4().hex
-    db.create_web_order(session_id, email=email, source=source)
-    log.info("[web] nueva sesion %s (email=%s, source=%s)", session_id, email, source)
+    db.create_web_order(session_id, source=source)
+    log.info("[web] nueva sesion %s (source=%s)", session_id, source)
     return {"session_id": session_id}
 
 
@@ -153,6 +169,8 @@ async def web_status(session_id: str):
         "paid": bool(order["paid"]),
         "delivered": bool(order["delivered"]),
         "audio_urls": audio_urls,
+        "payment_url": order.get("payment_url"),
+        "final_title": order.get("final_title"),
     }
 
 
@@ -162,24 +180,42 @@ async def web_status(session_id: str):
 # del pago llega por webhook/polling - es solo para que el cliente no vea un
 # JSON crudo y sepa que puede volver a Telegram.
 # ---------------------------------------------------------------------------
-@app.get("/pago-exitoso", response_class=HTMLResponse)
-async def pago_exitoso(web: str = "", session_id: str = ""):
-    # El flujo web (landing /cancion) abre el link de pago en una pestaña
-    # NUEVA para que la pestaña original con el chat siga viva haciendo
-    # polling a /web/status - aca solo confirmamos y pedimos volver a esa
-    # otra pestaña, sin nada de Telegram.
-    if web:
-        return """
-        <html>
-          <head><meta charset="utf-8"><title>Pago recibido</title></head>
-          <body style="font-family: sans-serif; text-align: center; padding: 60px 20px;">
-            <h1>🎵 ¡Pago recibido!</h1>
-            <p>Ya puedes cerrar esta pestaña y volver a la otra donde estaba tu canción -
-            en un par de minutos vas a ver el link de descarga ahí mismo.</p>
-          </body>
-        </html>
-        """
+# Version web: el link de pago abre en una pestaña NUEVA para que la
+# pestaña original con el chat siga viva haciendo polling a /web/status. El
+# session_id va en el PATH (no en query string) porque no todos los gateways
+# de pago preservan query params custom al armar la redireccion final - un
+# segmento de path es mucho mas dificil de perder. Con el session_id en la
+# URL, ademas, podemos reconocer al cliente y darle un link de regreso
+# directo a su chat (por si cierra esta pestaña o la perdio de algun modo).
+@app.get("/pago-exitoso/web/{session_id}", response_class=HTMLResponse)
+async def pago_exitoso_web(session_id: str):
+    return f"""
+    <html>
+      <head><meta charset="utf-8"><title>Pago recibido</title></head>
+      <body style="font-family: sans-serif; text-align: center; padding: 60px 20px;">
+        <h1>🎵 ¡Pago recibido!</h1>
+        <p>Ya puedes cerrar esta pestaña y volver a la otra donde estaba tu canción -
+        en un par de minutos vas a ver el link de descarga ahí mismo.</p>
+        <p style="color:#9a8b73; font-size:14px; margin-top:20px;">
+          ¿Cerraste esa pestaña por error? Puedes volver aquí:
+        </p>
+        <a href="/cancion?session_id={session_id}"
+           style="display:inline-block; margin-top:8px; padding:14px 28px;
+                  background:linear-gradient(135deg, #e8813a, #d96b2b); color:white;
+                  text-decoration:none; border-radius:8px; font-size:16px; font-weight:bold;">
+          ↩️ Ver el estado de mi canción
+        </a>
+      </body>
+    </html>
+    """
 
+
+@app.get("/pago-exitoso", response_class=HTMLResponse)
+async def pago_exitoso():
+    # Version Telegram (sin session_id en la URL - dLocal Go la usa igual
+    # para esos pagos). No hace falta que haga nada - la confirmacion real
+    # del pago llega por webhook/polling - es solo para que el cliente no
+    # vea un JSON crudo y sepa que puede volver a Telegram.
     boton = ""
     if BOT_USERNAME:
         boton = f"""

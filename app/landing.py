@@ -3,16 +3,18 @@ Landing page /cancion: la version "sin fricciones" que reemplaza al link a
 Telegram para el trafico de anuncios (Marketplace, etc.). Todo en un solo
 archivo HTML+CSS+JS embebido, servido como string (mismo patron que
 /admin y /pago-exitoso en main.py) - no hace falta un build step ni
-archivos estaticos aparte.
+archivos estaticos aparte (la unica excepcion es la imagen de marca, servida
+desde app/static/ - ver el mount en main.py).
 
-Flujo en el navegador:
-1. Pide el correo (para poder mandar la cancion por correo como respaldo).
-2. Abre el chat con Claude (mismo motor conversacional que el bot de
-   Telegram) para reunir los detalles y aprobar la letra.
-3. Cuando la letra queda aprobada, aparece el boton de pago (se abre en una
+Flujo en el navegador (sin pantalla de correo previa - eso es un click de
+friccion que se elimino a proposito):
+1. El chat con Claude se abre de una, apenas carga la pagina (mismo motor
+   conversacional que el bot de Telegram). Claude pide el correo el mismo,
+   como parte natural de la charla, cuando ya reunio los demas datos.
+2. Cuando la letra queda aprobada, aparece el boton de pago (se abre en una
    pestaña NUEVA a proposito, para que esta pestaña se quede viva haciendo
    polling de /web/status).
-4. En cuanto el pago se confirma y la cancion esta lista, aparece el link de
+3. En cuanto el pago se confirma y la cancion esta lista, aparece el link de
    descarga directo aca mismo - sin necesidad de instalar nada.
 """
 
@@ -27,28 +29,29 @@ LANDING_HTML = """<!DOCTYPE html>
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     background: linear-gradient(180deg, #fff7ed 0%, #fffaf5 100%);
-    color: #292018; margin: 0; padding: 24px 16px 60px;
+    color: #292018; margin: 0; padding: 0 16px 40px;
     min-height: 100vh;
   }
   .wrap { max-width: 560px; margin: 0 auto; }
-  h1 { font-size: 24px; text-align: center; margin: 8px 0 4px; }
-  .sub { text-align: center; color: #7c6f5f; font-size: 15px; margin-bottom: 24px; }
+  .hero { width: 100%; border-radius: 0 0 20px 20px; overflow: hidden; margin: 0 -16px 16px; }
+  .hero img { width: 100%; display: block; }
+  h1 { font-size: 22px; text-align: center; margin: 8px 0 4px; }
+  .sub { text-align: center; color: #7c6f5f; font-size: 14px; margin-bottom: 20px; }
   .card {
-    background: white; border-radius: 16px; padding: 20px;
+    background: white; border-radius: 16px; padding: 18px;
     box-shadow: 0 4px 20px rgba(180,120,60,0.10); margin-bottom: 16px;
   }
-  input[type=email], input[type=text] {
+  input[type=text] {
     width: 100%; padding: 13px 14px; border-radius: 10px; border: 1px solid #e7dccb;
-    font-size: 16px; margin-bottom: 12px;
+    font-size: 16px; margin-bottom: 0;
   }
   button {
-    width: 100%; padding: 14px; border-radius: 10px; border: none;
+    padding: 14px; border-radius: 10px; border: none;
     background: linear-gradient(135deg, #e8813a, #d96b2b); color: white;
     font-size: 16px; font-weight: 700; cursor: pointer;
   }
   button:disabled { opacity: 0.55; cursor: default; }
-  #chat { display: none; }
-  #mensajes { max-height: 60vh; overflow-y: auto; padding: 4px 2px; margin-bottom: 12px; }
+  #mensajes { max-height: 55vh; overflow-y: auto; padding: 4px 2px; margin-bottom: 12px; }
   .msg { padding: 10px 14px; border-radius: 14px; margin: 6px 0; font-size: 15px; line-height: 1.45; white-space: pre-wrap; }
   .msg.bot { background: #fff1e2; color: #4a3b26; border-bottom-left-radius: 4px; max-width: 92%; }
   .msg.user { background: #292018; color: white; margin-left: auto; border-bottom-right-radius: 4px; max-width: 85%; }
@@ -67,26 +70,21 @@ LANDING_HTML = """<!DOCTYPE html>
     vertical-align: middle; margin-right: 8px;
   }
   @keyframes girar { to { transform: rotate(360deg); } }
+  footer { text-align: center; font-size: 12px; color: #b3a58d; margin-top: 24px; }
+  footer a { color: #b3a58d; }
 </style>
 </head>
 <body>
 <div class="wrap">
+  <div class="hero"><img src="/static/landing-hero.jpg" alt="Canción personalizada"></div>
   <h1>🎵 Tu canción personalizada</h1>
   <p class="sub">Cuéntanos la historia y en minutos tienes tu canción única, lista para descargar aquí mismo.</p>
-
-  <div class="card" id="inicio">
-    <label for="email" style="font-size:14px; color:#6b5b45; display:block; margin-bottom:6px;">
-      ¿A qué correo te la mandamos como respaldo?
-    </label>
-    <input type="email" id="email" placeholder="tucorreo@ejemplo.com" required>
-    <button id="btn-empezar">Empezar</button>
-  </div>
 
   <div class="card" id="chat">
     <div id="mensajes"></div>
     <div class="fila-input">
-      <input type="text" id="input-mensaje" placeholder="Escribe aquí...">
-      <button id="btn-enviar">Enviar</button>
+      <input type="text" id="input-mensaje" placeholder="Escribe aquí..." disabled>
+      <button id="btn-enviar" disabled>Enviar</button>
     </div>
   </div>
 
@@ -110,6 +108,10 @@ LANDING_HTML = """<!DOCTYPE html>
       También te la mandamos por correo como respaldo.
     </p>
   </div>
+
+  <footer>
+    <a href="/terminos">Términos y condiciones</a> · <a href="/privacidad">Aviso de privacidad</a>
+  </footer>
 </div>
 
 <script>
@@ -126,25 +128,72 @@ function agregarMensaje(texto, quien) {
   $("mensajes").scrollTop = $("mensajes").scrollHeight;
 }
 
-async function empezar() {
-  const email = $("email").value.trim();
-  if (!email || !email.includes("@")) { alert("Ingresa un correo válido"); return; }
-  $("btn-empezar").disabled = true;
-  $("btn-empezar").textContent = "Un momento...";
-
+async function iniciar() {
   const params = new URLSearchParams(window.location.search);
+
+  // Si venimos de la pagina de "pago recibido" (boton "Ver el estado de mi
+  // cancion"), el link ya trae el session_id de esa compra - hay que
+  // retomarla en vez de crear una sesion nueva y perder el progreso.
+  const sessionExistente = params.get("session_id");
+  if (sessionExistente) {
+    sessionId = sessionExistente;
+    $("chat").style.display = "none";
+    const ok = await retomarSesion();
+    if (ok) return;
+    // si la sesion no existe o ya no aplica, seguimos como si fuera nueva
+    $("chat").style.display = "block";
+  }
+
   const source = params.get("source") || null;
 
   const resp = await fetch("/web/session", {
     method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({email, source}),
+    body: JSON.stringify({source}),
   });
   const data = await resp.json();
   sessionId = data.session_id;
 
-  $("inicio").style.display = "none";
-  $("chat").style.display = "block";
+  $("input-mensaje").disabled = false;
+  $("btn-enviar").disabled = false;
   await enviarTurno("");
+}
+
+async function retomarSesion() {
+  const resp = await fetch("/web/status?session_id=" + encodeURIComponent(sessionId));
+  if (!resp.ok) return false;
+  const data = await resp.json();
+
+  if (data.delivered && data.audio_urls && data.audio_urls.length) {
+    mostrarDescarga(data.audio_urls);
+    return true;
+  }
+  if (data.step === "generando" || data.paid) {
+    $("estado-box").style.display = "block";
+    iniciarPolling();
+    return true;
+  }
+  if (data.step === "esperando_pago" && data.payment_url) {
+    $("link-pago").href = data.payment_url;
+    $("pago-box").style.display = "block";
+    iniciarPolling();
+    return true;
+  }
+  return false; // no hay nada que retomar (ej. sesion muy vieja o invalida)
+}
+
+function mostrarDescarga(audioUrls) {
+  $("estado-box").style.display = "none";
+  $("pago-box").style.display = "none";
+  const cont = $("links-descarga");
+  cont.innerHTML = "";
+  audioUrls.forEach((url, i) => {
+    const a = document.createElement("a");
+    a.href = url; a.target = "_blank"; a.rel = "noopener";
+    a.textContent = audioUrls.length > 1 ? ("Descargar versión " + (i + 1)) : "Descargar mi canción";
+    cont.appendChild(a);
+    cont.appendChild(document.createElement("br"));
+  });
+  $("descarga-box").style.display = "block";
 }
 
 async function enviarTurno(texto) {
@@ -178,23 +227,11 @@ function iniciarPolling() {
     }
     if (data.delivered && data.audio_urls && data.audio_urls.length) {
       clearInterval(pollTimer);
-      $("estado-box").style.display = "none";
-      $("pago-box").style.display = "none";
-      const cont = $("links-descarga");
-      cont.innerHTML = "";
-      data.audio_urls.forEach((url, i) => {
-        const a = document.createElement("a");
-        a.href = url; a.target = "_blank"; a.rel = "noopener";
-        a.textContent = data.audio_urls.length > 1 ? ("Descargar versión " + (i + 1)) : "Descargar mi canción";
-        cont.appendChild(a);
-        cont.appendChild(document.createElement("br"));
-      });
-      $("descarga-box").style.display = "block";
+      mostrarDescarga(data.audio_urls);
     }
   }, 5000);
 }
 
-$("btn-empezar").addEventListener("click", empezar);
 $("btn-enviar").addEventListener("click", () => {
   const val = $("input-mensaje").value.trim();
   if (!val) return;
@@ -204,6 +241,8 @@ $("btn-enviar").addEventListener("click", () => {
 $("input-mensaje").addEventListener("keydown", (e) => {
   if (e.key === "Enter") $("btn-enviar").click();
 });
+
+iniciar();
 </script>
 </body>
 </html>
