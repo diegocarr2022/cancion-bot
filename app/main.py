@@ -278,6 +278,24 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
     canales = db.get_click_stats()
     bots_filtrados = db.get_bot_clicks_total()
     web_stats = db.get_web_stats()
+    web_orders = db.get_all_web_orders(limit=300)
+
+    filas_web = ""
+    for o in web_orders:
+        label, color = _ESTADO_LABELS.get(o["step"], (o["step"], "#9ca3af"))
+        monto = f"${o['amount_mxn']:.0f}" if o.get("amount_mxn") else "—"
+        nombre = o.get("customer_name") or "—"
+        correo = o.get("email") or "—"
+        filas_web += f"""
+        <tr>
+          <td>{nombre}</td>
+          <td>{correo}</td>
+          <td><span style="background:{color}22; color:{color}; padding:3px 10px;
+              border-radius:999px; font-size:13px; font-weight:600;">{label}</span></td>
+          <td>{monto}</td>
+          <td style="color:#6b7280; font-size:13px;">{o['created_at'][:16].replace('T', ' ')}</td>
+        </tr>
+        """
 
     filas_canales = ""
     for c in canales:
@@ -362,6 +380,18 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
           <div class="card"><div class="label">Ingresos</div>
             <div class="value">${web_stats['ingresos_mxn']:.0f} MXN</div></div>
         </div>
+        <p style="font-size:12px; color:#9ca3af; margin:-20px 0 12px;">
+          Nombre y correo capturados en el chat de la landing - utiles para armar
+          audiencias similares (lookalike) en Meta Ads.
+        </p>
+        <table style="margin-bottom:32px;">
+          <thead>
+            <tr><th>Nombre</th><th>Correo</th><th>Estado</th><th>Monto</th><th>Creado</th></tr>
+          </thead>
+          <tbody>
+            {filas_web or '<tr><td colspan="5" style="text-align:center; color:#9ca3af;">Sin pedidos web todavía</td></tr>'}
+          </tbody>
+        </table>
 
         <h2 style="font-size:16px; margin: 32px 0 4px;">📊 Por canal (link de tracking /ir/&lt;origen&gt;)</h2>
         <p style="font-size:12px; color:#9ca3af; margin:0 0 12px;">

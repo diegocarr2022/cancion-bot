@@ -23,9 +23,10 @@ log = logging.getLogger("cancion-bot")
 MAX_TOOL_ROUNDS = 4
 
 KICKOFF_TEXT = (
-    "¡Hola! Cuéntame para quién es la canción, la ocasión, el estilo que "
-    "prefieres, y algún detalle o anécdota que la haga única. En cuanto "
-    "tenga lo esencial te muestro el borrador completo de la letra."
+    "(Este es el arranque de una sesion nueva - el cliente todavia no escribio "
+    "nada. Saludalo con calidez y en ESE MISMO primer mensaje pregúntale su "
+    "nombre - nada mas por ahora, no le sumes las preguntas de la cancion "
+    "todavia, esas van en tu siguiente mensaje una vez que te diga como se llama.)"
 )
 
 
@@ -57,6 +58,7 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
         style = tool_input.get("style", "")
         lyric = tool_input.get("lyric", "")
         email = (tool_input.get("email") or "").strip()
+        customer_name = (tool_input.get("customer_name") or "").strip()
         # misma red de seguridad que en Telegram: separar estilo pegado al
         # inicio de la letra si Claude lo mezclo por error.
         idx = lyric.find("[")
@@ -73,6 +75,12 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
             log.warning(
                 "finalizar_letra (web) llamado sin un correo valido para session_id=%s: %r",
                 session_id, email,
+            )
+        if customer_name:
+            db.update_web_order(session_id, customer_name=customer_name)
+        else:
+            log.warning(
+                "finalizar_letra (web) llamado sin nombre para session_id=%s", session_id
             )
 
         order_id = f"web-{session_id}-{int(time.time())}"

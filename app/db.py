@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS clicks (
 CREATE TABLE IF NOT EXISTS web_orders (
     session_id TEXT PRIMARY KEY,
     email TEXT,
+    customer_name TEXT,
     step TEXT NOT NULL DEFAULT 'charlando',
     messages TEXT NOT NULL DEFAULT '[]',
     final_title TEXT,
@@ -115,6 +116,10 @@ MIGRATIONS = [
     # previa piden la URL "pelona" del anuncio, sin este parametro. Es la
     # senal mas confiable que tenemos de que un clic es humano de verdad.
     "ALTER TABLE clicks ADD COLUMN fbclid TEXT",
+    # Nombre del cliente, pedido al inicio de la charla web (despues del
+    # saludo) - junto con el correo, para poder armar audiencias similares
+    # (lookalike) en Meta Ads mas adelante.
+    "ALTER TABLE web_orders ADD COLUMN customer_name TEXT",
 ]
 
 
