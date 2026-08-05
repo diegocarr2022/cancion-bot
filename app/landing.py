@@ -130,6 +130,20 @@ function agregarMensaje(texto, quien) {
 
 async function iniciar() {
   const params = new URLSearchParams(window.location.search);
+
+  // Si venimos de la pagina de "pago recibido" (boton "Ver el estado de mi
+  // cancion"), el link ya trae el session_id de esa compra - hay que
+  // retomarla en vez de crear una sesion nueva y perder el progreso.
+  const sessionExistente = params.get("session_id");
+  if (sessionExistente) {
+    sessionId = sessionExistente;
+    $("chat").style.display = "none";
+    const ok = await retomarSesion();
+    if (ok) return;
+    // si la sesion no existe o ya no aplica, seguimos como si fuera nueva
+    $("chat").style.display = "block";
+  }
+
   const source = params.get("source") || null;
 
   const resp = await fetch("/web/session", {
@@ -142,6 +156,44 @@ async function iniciar() {
   $("input-mensaje").disabled = false;
   $("btn-enviar").disabled = false;
   await enviarTurno("");
+}
+
+async function retomarSesion() {
+  const resp = await fetch("/web/status?session_id=" + encodeURIComponent(sessionId));
+  if (!resp.ok) return false;
+  const data = await resp.json();
+
+  if (data.delivered && data.audio_urls && data.audio_urls.length) {
+    mostrarDescarga(data.audio_urls);
+    return true;
+  }
+  if (data.step === "generando" || data.paid) {
+    $("estado-box").style.display = "block";
+    iniciarPolling();
+    return true;
+  }
+  if (data.step === "esperando_pago" && data.payment_url) {
+    $("link-pago").href = data.payment_url;
+    $("pago-box").style.display = "block";
+    iniciarPolling();
+    return true;
+  }
+  return false; // no hay nada que retomar (ej. sesion muy vieja o invalida)
+}
+
+function mostrarDescarga(audioUrls) {
+  $("estado-box").style.display = "none";
+  $("pago-box").style.display = "none";
+  const cont = $("links-descarga");
+  cont.innerHTML = "";
+  audioUrls.forEach((url, i) => {
+    const a = document.createElement("a");
+    a.href = url; a.target = "_blank"; a.rel = "noopener";
+    a.textContent = audioUrls.length > 1 ? ("Descargar versión " + (i + 1)) : "Descargar mi canción";
+    cont.appendChild(a);
+    cont.appendChild(document.createElement("br"));
+  });
+  $("descarga-box").style.display = "block";
 }
 
 async function enviarTurno(texto) {
@@ -175,18 +227,7 @@ function iniciarPolling() {
     }
     if (data.delivered && data.audio_urls && data.audio_urls.length) {
       clearInterval(pollTimer);
-      $("estado-box").style.display = "none";
-      $("pago-box").style.display = "none";
-      const cont = $("links-descarga");
-      cont.innerHTML = "";
-      data.audio_urls.forEach((url, i) => {
-        const a = document.createElement("a");
-        a.href = url; a.target = "_blank"; a.rel = "noopener";
-        a.textContent = data.audio_urls.length > 1 ? ("Descargar versión " + (i + 1)) : "Descargar mi canción";
-        cont.appendChild(a);
-        cont.appendChild(document.createElement("br"));
-      });
-      $("descarga-box").style.display = "block";
+      mostrarDescarga(data.audio_urls);
     }
   }, 5000);
 }

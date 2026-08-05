@@ -84,7 +84,12 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
                 order_id=order_id,
                 description="Canción personalizada",
                 notification_url=f"{BASE_URL}/dlocal/webhook",
-                success_url=f"{BASE_URL}/pago-exitoso?web=1&session_id={session_id}",
+                # session_id va en el PATH, no en query string: algunos
+                # gateways de pago (dLocal Go incluido) no garantizan que
+                # preserven query params custom al armar la redireccion final
+                # - un segmento de path es mucho mas dificil de perder o
+                # pisar que un "?param=valor".
+                success_url=f"{BASE_URL}/pago-exitoso/web/{session_id}",
             )
         except Exception:
             log.exception("Error creando el pago web en dLocal Go para session_id=%s", session_id)
