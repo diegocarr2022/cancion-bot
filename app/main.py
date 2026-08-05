@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import secrets
+import uuid
 
 import re
 
@@ -12,9 +13,12 @@ from app import db
 from app.config import TELEGRAM_WEBHOOK_SECRET, BASE_URL, ADMIN_CHAT_ID, ADMIN_PANEL_PASSWORD
 from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
-from app.payment_confirm import confirmar_pago
-from app.suno_client import get_task_status, generate_custom_song
+from app.email_client import enviar_cancion_por_correo
+from app.landing import LANDING_HTML
+from app.payment_confirm import confirmar_pago, confirmar_pago_web
+from app.suno_client import get_task_status, generate_custom_song, extract_ready_items
 from app.telegram_client import send_document_by_url, send_message, set_webhook, get_me
+from app.web_conversation import handle_web_chat
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("cancion-bot")
@@ -53,9 +57,12 @@ async def startup():
     _spawn(poll_suno_tasks_loop())
     _spawn(poll_pending_payments_loop())
     _spawn(poll_stuck_generation_loop())
+    _spawn(poll_web_suno_tasks_loop())
+    _spawn(poll_web_pending_payments_loop())
     log.info(
         "Loops de background arrancados: poll_suno_tasks_loop, "
-        "poll_pending_payments_loop, poll_stuck_generation_loop"
+        "poll_pending_payments_loop, poll_stuck_generation_loop, "
+        "poll_web_suno_tasks_loop, poll_web_pending_payments_loop"
     )
 
 
@@ -95,13 +102,84 @@ async def ir_a_telegram(source: str, request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Landing web /cancion: alternativa sin friccion al link de Telegram para
+# trafico de anuncios (Marketplace, etc.) - todo el flujo (chat con Claude,
+# pago, entrega) pasa dentro de la misma pestana del navegador, sin pedir
+# instalar ninguna app. Ver app/landing.py y app/web_conversation.py.
+# ---------------------------------------------------------------------------
+@app.get("/cancion", response_class=HTMLResponse)
+async def cancion_landing():
+    return LANDING_HTML
+
+
+@app.post("/web/session")
+async def web_session(request: Request):
+    body = await request.json()
+    email = (body.get("email") or "").strip()
+    source = body.get("source")
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Correo invalido")
+
+    session_id = uuid.uuid4().hex
+    db.create_web_order(session_id, email=email, source=source)
+    log.info("[web] nueva sesion %s (email=%s, source=%s)", session_id, email, source)
+    return {"session_id": session_id}
+
+
+@app.post("/web/chat")
+async def web_chat(request: Request):
+    body = await request.json()
+    session_id = body.get("session_id")
+    message = body.get("message", "")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="Falta session_id")
+
+    try:
+        resultado = await handle_web_chat(session_id, message)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Sesion no encontrada")
+    return resultado
+
+
+@app.get("/web/status")
+async def web_status(session_id: str):
+    order = db.get_web_order(session_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Sesion no encontrada")
+    import json as _json
+    audio_urls = _json.loads(order["audio_urls"]) if order.get("audio_urls") else []
+    return {
+        "step": order["step"],
+        "paid": bool(order["paid"]),
+        "delivered": bool(order["delivered"]),
+        "audio_urls": audio_urls,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Pagina a la que dLocal Go redirige al cliente en su navegador despues de
 # pagar (success_url). No hace falta que haga nada - la confirmacion real
 # del pago llega por webhook/polling - es solo para que el cliente no vea un
 # JSON crudo y sepa que puede volver a Telegram.
 # ---------------------------------------------------------------------------
 @app.get("/pago-exitoso", response_class=HTMLResponse)
-async def pago_exitoso():
+async def pago_exitoso(web: str = "", session_id: str = ""):
+    # El flujo web (landing /cancion) abre el link de pago en una pestaña
+    # NUEVA para que la pestaña original con el chat siga viva haciendo
+    # polling a /web/status - aca solo confirmamos y pedimos volver a esa
+    # otra pestaña, sin nada de Telegram.
+    if web:
+        return """
+        <html>
+          <head><meta charset="utf-8"><title>Pago recibido</title></head>
+          <body style="font-family: sans-serif; text-align: center; padding: 60px 20px;">
+            <h1>🎵 ¡Pago recibido!</h1>
+            <p>Ya puedes cerrar esta pestaña y volver a la otra donde estaba tu canción -
+            en un par de minutos vas a ver el link de descarga ahí mismo.</p>
+          </body>
+        </html>
+        """
+
     boton = ""
     if BOT_USERNAME:
         boton = f"""
@@ -163,6 +241,7 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
     orders = db.get_all_orders(limit=300)
     canales = db.get_click_stats()
     bots_filtrados = db.get_bot_clicks_total()
+    web_stats = db.get_web_stats()
 
     filas_canales = ""
     for c in canales:
@@ -234,6 +313,18 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
             <div class="value">{stats['fallidos']}</div></div>
           <div class="card"><div class="label">Total de pedidos</div>
             <div class="value">{stats['total']}</div></div>
+        </div>
+
+        <h2 style="font-size:16px; margin: 32px 0 4px;">🌐 Landing web (/cancion)</h2>
+        <div class="cards" style="margin-bottom:32px;">
+          <div class="card"><div class="label">Sesiones totales</div>
+            <div class="value">{web_stats['total']}</div></div>
+          <div class="card"><div class="label">Pagados</div>
+            <div class="value">{web_stats['pagados']}</div></div>
+          <div class="card"><div class="label">Entregados</div>
+            <div class="value">{web_stats['entregados']}</div></div>
+          <div class="card"><div class="label">Ingresos</div>
+            <div class="value">${web_stats['ingresos_mxn']:.0f} MXN</div></div>
         </div>
 
         <h2 style="font-size:16px; margin: 32px 0 4px;">📊 Por canal (link de tracking /ir/&lt;origen&gt;)</h2>
@@ -331,10 +422,14 @@ async def dlocal_webhook(request: Request, authorization: str = Header(default="
         return {"ok": True}
 
     order = db.find_by_payment_request_id(payment_id)
-    if not order or order["paid"]:
+    if order and not order["paid"]:
+        await confirmar_pago(order["chat_id"])
         return {"ok": True}
 
-    await confirmar_pago(order["chat_id"])
+    web_order = db.find_web_by_payment_request_id(payment_id)
+    if web_order and not web_order["paid"]:
+        await confirmar_pago_web(web_order["session_id"])
+
     return {"ok": True}
 
 
@@ -365,46 +460,20 @@ async def check_and_deliver(order: dict):
         return
 
     state = task.get("state")
-    response = task.get("response") or {}
-    success = response.get("success")
-    items = response.get("data") or []
-    total_items = len(items)
-
-    # IMPORTANTE (descubierto en produccion, con el error real de un 400 de
-    # Telegram al intentar entregar): "state" a nivel de la tarea y
-    # "response.success" NO son confiables (llegan None en la practica).
-    # Cada elemento de "data" es una variante (Suno SIEMPRE genera 2 por
-    # pedido, dos versiones distintas de la misma cancion) y TIENE SU PROPIO
-    # "audio_url" que aparece MUY TEMPRANO - es un endpoint de streaming que
-    # existe desde que arranca la generacion, no cuando termina. La senal
-    # real de que una variante ya esta completamente renderizada (y por lo
-    # tanto es un archivo valido para mandarle a Telegram) es que ademas
-    # tenga "duration" (numero de segundos) - ese campo se queda en None
-    # mientras se sigue generando.
-    #
-    # Como las 2 variantes ya estan pagadas (el cliente paga por la
-    # generacion, no por una sola version), esperamos a que TODAS las
-    # variantes que no hayan fallado terminen, y se las entregamos ambas -
-    # asi el cliente se queda con las 2 versiones distintas que genero Suno.
-    ready_items = []
-    failed_count = 0
-    for item in items:
-        item_state = (item.get("state") or "").lower()
-        if item_state in ("error", "failed"):
-            failed_count += 1
-            continue
-        if item.get("audio_url") and item.get("duration"):
-            ready_items.append(item)
-
-    pendientes = total_items - failed_count - len(ready_items)
+    info = extract_ready_items(task)
+    ready_items = info["ready_items"]
+    failed_count = info["failed_count"]
+    total_items = info["total_items"]
+    pendientes = info["pendientes"]
 
     log.info(
         "Suno task %s (chat_id=%s): state=%s success=%s listas=%d/%d fallidas=%d raw=%s",
-        order["suno_task_id"], order["chat_id"], state, success,
+        order["suno_task_id"], order["chat_id"], state, info["success"],
         len(ready_items), total_items, failed_count, task,
     )
 
-    if success is False or (total_items > 0 and failed_count == total_items):
+    if info["fallo_total"]:
+        response = (task.get("response") or {})
         log.error("La generacion de Suno fallo para chat_id=%s: %s", order["chat_id"], response)
         db.update_order(order["chat_id"], step="charlando", suno_task_id=None)
         await send_message(
@@ -548,3 +617,103 @@ async def reintentar_generacion_automatica(order: dict):
             f"⚠️ La generación de la canción de chat_id {chat_id} sigue fallando "
             "después de un reintento automático. Puede necesitar revisión manual.",
         )
+
+
+# ---------------------------------------------------------------------------
+# Loops de fondo para los pedidos web (landing /cancion) - misma logica que
+# los de Telegram, en paralelo, sobre la tabla web_orders. Aca no hay
+# Telegram al que mandarle mensajes: el cliente se entera por el polling de
+# /web/status en su propia pestana (ver app/landing.py) y por el correo de
+# respaldo (ver app/email_client.py).
+# ---------------------------------------------------------------------------
+async def poll_web_pending_payments_loop():
+    while True:
+        try:
+            pending = db.find_pending_web_payments()
+            log.info("[poll_web_pending_payments_loop] tick - %d pago(s) web pendiente(s)", len(pending))
+            for order in pending:
+                await check_web_payment_status(order)
+        except Exception:
+            log.exception("Error en el loop de polling de pagos web")
+        await asyncio.sleep(20)
+
+
+async def check_web_payment_status(order: dict):
+    try:
+        payment = await get_payment(order["payment_request_id"])
+    except Exception:
+        log.exception("Error consultando pago web pendiente para session_id=%s", order["session_id"])
+        return
+
+    status = payment.get("status")
+    if status == "PAID":
+        await confirmar_pago_web(order["session_id"])
+        return
+
+    if status in ("REJECTED", "CANCELLED", "EXPIRED"):
+        log.warning(
+            "El pago web de session_id=%s (email=%s) quedó en estado %s.",
+            order["session_id"], order.get("email"), status,
+        )
+
+
+async def poll_web_suno_tasks_loop():
+    while True:
+        try:
+            pending = db.find_unfinished_web_suno_tasks()
+            log.info("[poll_web_suno_tasks_loop] tick - %d pedido(s) web en generacion", len(pending))
+            for order in pending:
+                await check_and_deliver_web(order)
+        except Exception:
+            log.exception("Error en el loop de polling de Suno (web)")
+        await asyncio.sleep(20)
+
+
+async def check_and_deliver_web(order: dict):
+    import json as _json
+
+    try:
+        task = await get_task_status(order["suno_task_id"])
+    except Exception:
+        log.exception("Error consultando estado de Suno para session_id=%s (web)", order["session_id"])
+        return
+
+    info = extract_ready_items(task)
+    ready_items = info["ready_items"]
+
+    log.info(
+        "Suno task %s (session_id=%s, web): listas=%d/%d fallidas=%d",
+        order["suno_task_id"], order["session_id"],
+        len(ready_items), info["total_items"], info["failed_count"],
+    )
+
+    if info["fallo_total"]:
+        log.error(
+            "La generacion de Suno fallo para session_id=%s (web): %s",
+            order["session_id"], task.get("response"),
+        )
+        db.update_web_order(order["session_id"], suno_task_id=None)
+        await send_message(
+            ADMIN_CHAT_ID,
+            f"⚠️ Suno reportó 'failed' para un pedido web (email={order.get('email')}, "
+            f"session_id={order['session_id']}).",
+        )
+        return
+
+    if info["pendientes"] > 0 or not ready_items:
+        return
+
+    audio_urls = [item["audio_url"] for item in ready_items]
+    db.update_web_order(
+        order["session_id"],
+        delivered=1,
+        step="entregado",
+        audio_urls=_json.dumps(audio_urls),
+    )
+
+    if order.get("email"):
+        enviado = await enviar_cancion_por_correo(
+            order["email"], order.get("final_title") or "Tu canción", audio_urls
+        )
+        if enviado:
+            db.update_web_order(order["session_id"], delivered_email=1)

@@ -34,3 +34,14 @@ TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 # valida la contraseña. Si no la configuras, el panel queda deshabilitado
 # por seguridad (nunca lo dejamos abierto por defecto).
 ADMIN_PANEL_PASSWORD = os.environ.get("ADMIN_PANEL_PASSWORD", "")
+
+# --- Gmail (envio de la cancion por correo, para los pedidos de la landing web) ---
+# GMAIL_USER: la cuenta de Gmail/Workspace desde la que se manda el correo.
+# GMAIL_APP_PASSWORD: una "contraseña de aplicacion" generada en la
+# configuracion de seguridad de esa cuenta de Google (NO la contraseña
+# normal - Gmail no acepta la contraseña normal para SMTP de apps externas).
+# Si no se configuran, el envio de correo se salta silenciosamente (se loguea
+# una advertencia) - el link de descarga sigue apareciendo en el chat web de
+# todas formas, asi que no bloquea la entrega.
+GMAIL_USER = os.environ.get("GMAIL_USER", "")
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")

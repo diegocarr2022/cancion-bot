@@ -53,6 +53,37 @@ CREATE TABLE IF NOT EXISTS clicks (
     is_bot INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
+
+-- Pedidos que vienen de la landing web (/cancion), en paralelo al flujo de
+-- Telegram (tabla orders). Se identifican por session_id (un uuid generado
+-- en el navegador del cliente) en vez de chat_id. El orden de pasos es
+-- distinto al de Telegram: aca se charla con Claude ANTES de pagar (para no
+-- pedirle dinero al cliente antes de mostrarle nada, que es justo la
+-- friccion/desconfianza que se queria evitar con esta landing), y recien
+-- cuando aprueba la letra se genera el link de pago. Ya con content
+-- aprobado, no hace falta que Claude vuelva a hablar despues del pago - se
+-- manda derecho a Suno.
+CREATE TABLE IF NOT EXISTS web_orders (
+    session_id TEXT PRIMARY KEY,
+    email TEXT,
+    step TEXT NOT NULL DEFAULT 'charlando',
+    messages TEXT NOT NULL DEFAULT '[]',
+    final_title TEXT,
+    final_style TEXT,
+    final_lyric TEXT,
+    payment_request_id TEXT,
+    payment_url TEXT,
+    paid INTEGER NOT NULL DEFAULT 0,
+    amount_mxn REAL,
+    suno_task_id TEXT,
+    audio_urls TEXT,
+    delivered INTEGER NOT NULL DEFAULT 0,
+    delivered_email INTEGER NOT NULL DEFAULT 0,
+    source TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_web_payment_request_id ON web_orders(payment_request_id);
 """
 
 # Migraciones simples para bases de datos que ya existian con el esquema
@@ -369,5 +400,108 @@ def find_stuck_generation(older_than_seconds: int = 900):
             "AND final_lyric IS NOT NULL "
             "AND (julianday('now') - julianday(updated_at)) * 86400 > ?",
             (older_than_seconds,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# web_orders: mismo patron que orders, pero identificados por session_id
+# (uuid) en vez de chat_id - para los pedidos que vienen de la landing web
+# (/cancion) en vez de Telegram. Ver comentario en SCHEMA para el porque del
+# orden de pasos distinto (charlando -> esperando_pago -> generando -> entregado).
+# ---------------------------------------------------------------------------
+def get_web_order(session_id: str):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM web_orders WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def create_web_order(session_id: str, email: str | None = None, source: str | None = None):
+    now = datetime.utcnow().isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO web_orders (session_id, email, step, messages, source, created_at, updated_at)
+            VALUES (?, ?, 'charlando', '[]', ?, ?, ?)
+            """,
+            (session_id, email, source, now, now),
+        )
+
+
+def update_web_order(session_id: str, **fields):
+    if not fields:
+        return
+    fields["updated_at"] = datetime.utcnow().isoformat()
+    cols = ", ".join(f"{k} = ?" for k in fields)
+    values = list(fields.values()) + [session_id]
+    with get_conn() as conn:
+        conn.execute(f"UPDATE web_orders SET {cols} WHERE session_id = ?", values)
+
+
+def get_web_messages(session_id: str) -> list:
+    order = get_web_order(session_id)
+    if not order or not order.get("messages"):
+        return []
+    return json.loads(order["messages"])
+
+
+def set_web_messages(session_id: str, messages: list):
+    update_web_order(session_id, messages=json.dumps(messages, ensure_ascii=False))
+
+
+def save_web_final_letra(session_id: str, title: str, style: str, lyric: str):
+    update_web_order(session_id, final_title=title, final_style=style, final_lyric=lyric)
+
+
+def find_web_by_payment_request_id(payment_request_id: str):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM web_orders WHERE payment_request_id = ?", (payment_request_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def find_unfinished_web_suno_tasks():
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM web_orders WHERE paid = 1 AND suno_task_id IS NOT NULL AND delivered = 0"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def find_pending_web_payments():
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM web_orders WHERE paid = 0 AND payment_request_id IS NOT NULL"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_web_stats():
+    """Resumen chico de la landing web, para mostrar junto al panel de admin
+    de Telegram y no perder visibilidad de este canal nuevo."""
+    with get_conn() as conn:
+        total = conn.execute("SELECT COUNT(*) AS n FROM web_orders").fetchone()["n"]
+        pagados = conn.execute("SELECT COUNT(*) AS n FROM web_orders WHERE paid = 1").fetchone()["n"]
+        entregados = conn.execute(
+            "SELECT COUNT(*) AS n FROM web_orders WHERE step = 'entregado'"
+        ).fetchone()["n"]
+        ingresos = conn.execute(
+            "SELECT COALESCE(SUM(amount_mxn), 0) AS total FROM web_orders WHERE paid = 1"
+        ).fetchone()["total"]
+        return {
+            "total": total,
+            "pagados": pagados,
+            "entregados": entregados,
+            "ingresos_mxn": ingresos or 0,
+        }
+
+
+def get_all_web_orders(limit: int = 300):
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM web_orders ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]

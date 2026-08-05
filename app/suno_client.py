@@ -67,3 +67,36 @@ async def get_task_status(task_id: str) -> dict:
         )
         resp.raise_for_status()
         return resp.json()
+
+
+def extract_ready_items(task: dict) -> dict:
+    """Logica compartida (Telegram y web) para decidir que variantes de Suno
+    ya estan completamente listas para entregar. Ver la nota larga en
+    main.py/check_and_deliver: "state"/"success" a nivel de tarea no son
+    confiables, la señal real es que cada variante tenga audio_url Y duration."""
+    response = task.get("response") or {}
+    success = response.get("success")
+    items = response.get("data") or []
+    total_items = len(items)
+
+    ready_items = []
+    failed_count = 0
+    for item in items:
+        item_state = (item.get("state") or "").lower()
+        if item_state in ("error", "failed"):
+            failed_count += 1
+            continue
+        if item.get("audio_url") and item.get("duration"):
+            ready_items.append(item)
+
+    pendientes = total_items - failed_count - len(ready_items)
+    fallo_total = success is False or (total_items > 0 and failed_count == total_items)
+
+    return {
+        "ready_items": ready_items,
+        "failed_count": failed_count,
+        "total_items": total_items,
+        "pendientes": pendientes,
+        "fallo_total": fallo_total,
+        "success": success,
+    }
