@@ -24,6 +24,10 @@ services:
         sync: false
       - key: BASE_URL
         sync: false
+      - key: GMAIL_USER
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
       - key: DLOCAL_API_KEY
         sync: false
       - key: DLOCAL_SECRET_KEY
