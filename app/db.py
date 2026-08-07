@@ -341,10 +341,14 @@ def find_unfinished_suno_tasks():
 
 def find_pending_payments():
     """Pedidos que ya tienen un link de pago generado pero todavia no se
-    confirman como pagados - para el chequeo automatico en segundo plano."""
+    confirman como pagados - para el chequeo automatico en segundo plano.
+    Excluye los que ya se marcaron 'pago_fallido' (incluye los vencidos por
+    abandono, ver PENDING_PAYMENT_MAX_HORAS en config.py) para no seguir
+    reconsultandolos para siempre."""
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM orders WHERE paid = 0 AND payment_request_id IS NOT NULL"
+            "SELECT * FROM orders WHERE paid = 0 AND payment_request_id IS NOT NULL "
+            "AND step != 'pago_fallido'"
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -490,9 +494,12 @@ def find_unfinished_web_suno_tasks():
 
 
 def find_pending_web_payments():
+    """Ver find_pending_payments() - misma exclusion de 'pago_fallido' para
+    no reconsultar pagos vencidos/abandonados para siempre."""
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM web_orders WHERE paid = 0 AND payment_request_id IS NOT NULL"
+            "SELECT * FROM web_orders WHERE paid = 0 AND payment_request_id IS NOT NULL "
+            "AND step != 'pago_fallido'"
         ).fetchall()
         return [dict(r) for r in rows]
 

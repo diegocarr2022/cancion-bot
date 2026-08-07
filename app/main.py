@@ -5,6 +5,7 @@ import secrets
 import uuid
 
 import re
+from datetime import datetime
 
 from fastapi import FastAPI, Request, Header, HTTPException, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -20,6 +21,7 @@ from app.config import (
     get_precio_pais,
     POLL_INTERVAL_SECONDS,
     POLL_INTERVAL_STUCK_SECONDS,
+    PENDING_PAYMENT_MAX_HORAS,
 )
 from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
@@ -48,6 +50,14 @@ BOT_USERNAME = ""
 # simplemente deja de correr en silencio. Por eso guardamos todas las tareas
 # de fondo aca, para que nunca se recolecten mientras el proceso este vivo.
 _background_tasks: set[asyncio.Task] = set()
+
+
+def _horas_desde(iso_timestamp: str) -> float:
+    try:
+        entonces = datetime.fromisoformat(iso_timestamp)
+    except (TypeError, ValueError):
+        return 0.0
+    return (datetime.utcnow() - entonces).total_seconds() / 3600
 
 
 def _memoria_mb() -> float:
@@ -668,6 +678,19 @@ async def poll_pending_payments_loop():
 
 
 async def check_payment_status(order: dict):
+    # Si el cliente abrio el link de pago y lo abandono (nunca pago ni lo
+    # cancelo), dLocal Go puede quedarse indefinidamente en un estado "no
+    # final" sin avisar - sin este corte, este pago se reconsultaria PARA
+    # SIEMPRE, cada minuto, generando llamadas HTTP sin fin (ver diagnostico
+    # de fuga de memoria de ago 2026).
+    if _horas_desde(order["updated_at"]) > PENDING_PAYMENT_MAX_HORAS:
+        db.update_order(order["chat_id"], step="pago_fallido")
+        log.info(
+            "Pago abandonado (mas de %sh sin resolverse) para chat_id=%s - se deja de reintentar.",
+            PENDING_PAYMENT_MAX_HORAS, order["chat_id"],
+        )
+        return
+
     try:
         payment = await get_payment(order["payment_request_id"])
     except Exception:
@@ -756,6 +779,16 @@ async def poll_web_pending_payments_loop():
 
 
 async def check_web_payment_status(order: dict):
+    # Mismo corte que en Telegram (ver check_payment_status) - evita
+    # reconsultar para siempre un checkout que el cliente abrio y abandono.
+    if _horas_desde(order["updated_at"]) > PENDING_PAYMENT_MAX_HORAS:
+        db.update_web_order(order["session_id"], step="pago_fallido")
+        log.info(
+            "Pago web abandonado (mas de %sh sin resolverse) para session_id=%s - se deja de reintentar.",
+            PENDING_PAYMENT_MAX_HORAS, order["session_id"],
+        )
+        return
+
     try:
         payment = await get_payment(order["payment_request_id"])
     except Exception:
@@ -768,6 +801,7 @@ async def check_web_payment_status(order: dict):
         return
 
     if status in ("REJECTED", "CANCELLED", "EXPIRED"):
+        db.update_web_order(order["session_id"], step="pago_fallido")
         log.warning(
             "El pago web de session_id=%s (email=%s) quedó en estado %s.",
             order["session_id"], order.get("email"), status,

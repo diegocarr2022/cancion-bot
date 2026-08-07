@@ -89,3 +89,12 @@ GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 # Configurable por environment para poder ajustarlo sin tocar codigo.
 POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "60"))
 POLL_INTERVAL_STUCK_SECONDS = int(os.environ.get("POLL_INTERVAL_STUCK_SECONDS", "90"))
+
+# Cuantas horas se sigue reintentando un pago que quedo "pendiente" sin que
+# dLocal Go nunca lo mueva a un estado final (PAID/REJECTED/CANCELLED/
+# EXPIRED) - pasa cuando alguien abre el link de pago y lo abandona sin
+# completar ni cancelar nada. Sin este limite, los loops de polling
+# reconsultan esos mismos pagos abandonados PARA SIEMPRE, generando
+# llamadas HTTP repetidas sin fin - ver el diagnostico de fuga de memoria
+# de ago 2026.
+PENDING_PAYMENT_MAX_HORAS = int(os.environ.get("PENDING_PAYMENT_MAX_HORAS", "48"))
