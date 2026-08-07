@@ -81,3 +81,11 @@ ADMIN_PANEL_PASSWORD = os.environ.get("ADMIN_PANEL_PASSWORD", "")
 # todas formas, asi que no bloquea la entrega.
 GMAIL_USER = os.environ.get("GMAIL_USER", "")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+
+# --- Intervalo de los loops de fondo (segundos) ---
+# Subidos temporalmente (de 20/30s a 60/90s por default) mientras se
+# diagnostica una fuga de memoria en Render (ago 2026) - menos vueltas por
+# minuto = menos presion de memoria mientras encontramos la causa real.
+# Configurable por environment para poder ajustarlo sin tocar codigo.
+POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", "60"))
+POLL_INTERVAL_STUCK_SECONDS = int(os.environ.get("POLL_INTERVAL_STUCK_SECONDS", "90"))

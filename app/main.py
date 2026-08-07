@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import resource
 import secrets
 import uuid
 
@@ -17,6 +18,8 @@ from app.config import (
     ADMIN_CHAT_ID,
     ADMIN_PANEL_PASSWORD,
     get_precio_pais,
+    POLL_INTERVAL_SECONDS,
+    POLL_INTERVAL_STUCK_SECONDS,
 )
 from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
@@ -45,6 +48,16 @@ BOT_USERNAME = ""
 # simplemente deja de correr en silencio. Por eso guardamos todas las tareas
 # de fondo aca, para que nunca se recolecten mientras el proceso este vivo.
 _background_tasks: set[asyncio.Task] = set()
+
+
+def _memoria_mb() -> float:
+    """Memoria pico (RSS) usada por el proceso hasta ahora, en MB - via el
+    modulo estandar `resource` (Linux), sin depender de librerias externas
+    como psutil. OJO: ru_maxrss es un maximo acumulado, nunca baja durante la
+    vida del proceso - lo usamos solo para ver la TENDENCIA entre ticks de
+    los loops de fondo mientras se diagnostica la fuga de memoria reportada
+    en Render (ago 2026), no como memoria "actual" exacta."""
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
 
 
 def _spawn(coro) -> asyncio.Task:
@@ -536,12 +549,15 @@ async def poll_suno_tasks_loop():
             # "Latido" visible en el log: confirma que el loop sigue vivo en
             # cada vuelta, aunque no haya nada pendiente. Sin esto, un log
             # silencioso por horas se puede confundir con un loop muerto.
-            log.info("[poll_suno_tasks_loop] tick - %d pedido(s) en generacion", len(pending))
+            log.info(
+                "[poll_suno_tasks_loop] tick - %d pedido(s) en generacion - mem=%.1fMB",
+                len(pending), _memoria_mb(),
+            )
             for order in pending:
                 await check_and_deliver(order)
         except Exception:
             log.exception("Error en el loop de polling de Suno")
-        await asyncio.sleep(20)
+        await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
 
 async def check_and_deliver(order: dict):
@@ -640,12 +656,15 @@ async def poll_pending_payments_loop():
     while True:
         try:
             pending = db.find_pending_payments()
-            log.info("[poll_pending_payments_loop] tick - %d pago(s) pendiente(s)", len(pending))
+            log.info(
+                "[poll_pending_payments_loop] tick - %d pago(s) pendiente(s) - mem=%.1fMB",
+                len(pending), _memoria_mb(),
+            )
             for order in pending:
                 await check_payment_status(order)
         except Exception:
             log.exception("Error en el loop de polling de pagos")
-        await asyncio.sleep(20)
+        await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
 
 async def check_payment_status(order: dict):
@@ -685,12 +704,15 @@ async def poll_stuck_generation_loop():
     while True:
         try:
             stuck = db.find_stuck_generation()
-            log.info("[poll_stuck_generation_loop] tick - %d generacion(es) atascada(s)", len(stuck))
+            log.info(
+                "[poll_stuck_generation_loop] tick - %d generacion(es) atascada(s) - mem=%.1fMB",
+                len(stuck), _memoria_mb(),
+            )
             for order in stuck:
                 await reintentar_generacion_automatica(order)
         except Exception:
             log.exception("Error en el loop de polling de generaciones atascadas")
-        await asyncio.sleep(30)
+        await asyncio.sleep(POLL_INTERVAL_STUCK_SECONDS)
 
 
 async def reintentar_generacion_automatica(order: dict):
@@ -722,12 +744,15 @@ async def poll_web_pending_payments_loop():
     while True:
         try:
             pending = db.find_pending_web_payments()
-            log.info("[poll_web_pending_payments_loop] tick - %d pago(s) web pendiente(s)", len(pending))
+            log.info(
+                "[poll_web_pending_payments_loop] tick - %d pago(s) web pendiente(s) - mem=%.1fMB",
+                len(pending), _memoria_mb(),
+            )
             for order in pending:
                 await check_web_payment_status(order)
         except Exception:
             log.exception("Error en el loop de polling de pagos web")
-        await asyncio.sleep(20)
+        await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
 
 async def check_web_payment_status(order: dict):
@@ -753,12 +778,15 @@ async def poll_web_suno_tasks_loop():
     while True:
         try:
             pending = db.find_unfinished_web_suno_tasks()
-            log.info("[poll_web_suno_tasks_loop] tick - %d pedido(s) web en generacion", len(pending))
+            log.info(
+                "[poll_web_suno_tasks_loop] tick - %d pedido(s) web en generacion - mem=%.1fMB",
+                len(pending), _memoria_mb(),
+            )
             for order in pending:
                 await check_and_deliver_web(order)
         except Exception:
             log.exception("Error en el loop de polling de Suno (web)")
-        await asyncio.sleep(20)
+        await asyncio.sleep(POLL_INTERVAL_SECONDS)
 
 
 async def check_and_deliver_web(order: dict):
