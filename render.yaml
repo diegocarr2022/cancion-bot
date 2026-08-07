@@ -40,3 +40,7 @@ services:
         value: "$197 MXN"
       - key: DB_PATH
         value: "/data/orders.db"
+      - key: POLL_INTERVAL_SECONDS
+        value: "60"
+      - key: POLL_INTERVAL_STUCK_SECONDS
+        value: "90"
