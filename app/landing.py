@@ -16,8 +16,75 @@ friccion que se elimino a proposito):
    polling de /web/status).
 3. En cuanto el pago se confirma y la cancion esta lista, aparece el link de
    descarga directo aca mismo - sin necesidad de instalar nada.
+
+Bloque "Como funciona" y de muestras de audio: agregados para prevenir la
+confusion detectada en produccion (ago 2026) de clientes que pensaban que la
+LETRA escrita ya era "la cancion" - el explicador de 4 pasos deja clarisimo
+que el audio cantado es un paso aparte, posterior al pago.
+
+SAMPLE_AUDIO_URLS: lista de URLs de audio de muestra (canciones DEMO,
+generadas especificamente para mostrar en la landing - nunca canciones de
+clientes reales sin permiso). Vacia por default - la seccion de muestras se
+oculta sola hasta que se carguen 1-2 URLs reales aca.
 """
 
+# Los archivos van directo en app/static/ (Diego los baja de Suno y los sube
+# el mismo con estos nombres exactos, sin pasar por el flujo de pago) - la
+# seccion de muestras se activa sola en cuanto los dos archivos existen.
+SAMPLE_AUDIO_URLS: list[dict] = [
+    {"titulo": "Cumpleaños de mamá", "url": "/static/audio1.mp3"},
+    {"titulo": "Aniversario de pareja", "url": "/static/audio2.mp3"},
+]
+
+_PASOS_HTML = """
+<div class="card" id="pasos">
+  <h2 class="pasos-titulo">¿Cómo funciona?</h2>
+  <div class="paso">
+    <div class="paso-num">1</div>
+    <div><strong>Cuéntanos la historia</strong><br>
+    <span class="paso-desc">Chateas con nosotros: para quién es, la ocasión, el estilo que prefieres.</span></div>
+  </div>
+  <div class="paso">
+    <div class="paso-num">2</div>
+    <div><strong>Aprueba la letra escrita</strong><br>
+    <span class="paso-desc">Te mostramos el texto de la canción para que lo ajustes hasta que quede perfecto.</span></div>
+  </div>
+  <div class="paso">
+    <div class="paso-num">3</div>
+    <div><strong>Pagas y generamos el audio</strong><br>
+    <span class="paso-desc">Con la letra aprobada, creamos la canción cantada de verdad (esto toma unos minutos).</span></div>
+  </div>
+  <div class="paso">
+    <div class="paso-num">4</div>
+    <div><strong>Recibes tu canción cantada</strong><br>
+    <span class="paso-desc">Un archivo de audio listo para descargar y compartir - aquí mismo y por correo.</span></div>
+  </div>
+</div>
+"""
+
+if SAMPLE_AUDIO_URLS:
+    _reproductores = "".join(
+        f"""
+        <div class="muestra">
+          <p class="muestra-titulo">🎵 {m['titulo']}</p>
+          <audio controls preload="none" src="{m['url']}"></audio>
+        </div>
+        """
+        for m in SAMPLE_AUDIO_URLS
+    )
+    _MUESTRAS_HTML = f"""
+    <div class="card" id="muestras">
+      <h2 class="pasos-titulo">Escucha un ejemplo</h2>
+      {_reproductores}
+    </div>
+    """
+else:
+    _MUESTRAS_HTML = ""
+
+# NOTA: LANDING_HTML es un string NORMAL (no f-string) a proposito - tiene
+# mucho CSS/JS con llaves "{ }" sueltas que romperian un f-string. El bloque
+# de pasos/muestras se inserta con un .replace() simple sobre un marcador
+# unico (___PASOS_Y_MUESTRAS___), ver el final del archivo.
 LANDING_HTML = """<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -72,13 +139,31 @@ LANDING_HTML = """<!DOCTYPE html>
   @keyframes girar { to { transform: rotate(360deg); } }
   footer { text-align: center; font-size: 12px; color: #b3a58d; margin-top: 24px; }
   footer a { color: #b3a58d; }
+
+  .pasos-titulo { font-size: 16px; margin: 0 0 14px; text-align: center; }
+  .paso { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 14px; }
+  .paso:last-child { margin-bottom: 0; }
+  .paso-num {
+    flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%;
+    background: linear-gradient(135deg, #e8813a, #d96b2b); color: white;
+    font-weight: 700; font-size: 14px; display: flex; align-items: center;
+    justify-content: center;
+  }
+  .paso-desc { font-size: 13px; color: #7c6f5f; }
+
+  .muestra { margin-bottom: 14px; }
+  .muestra:last-child { margin-bottom: 0; }
+  .muestra-titulo { font-size: 14px; font-weight: 600; margin: 0 0 6px; }
+  .muestra audio { width: 100%; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="hero"><img src="/static/landing-hero.jpg" alt="Canción personalizada"></div>
   <h1>🎵 Tu canción personalizada</h1>
-  <p class="sub">Cuéntanos la historia y en minutos tienes tu canción única, lista para descargar aquí mismo.</p>
+  <p class="sub">Una canción original, cantada de verdad, hecha con tu historia. Lista para descargar en minutos.</p>
+
+  ___PASOS_Y_MUESTRAS___
 
   <div class="card" id="chat">
     <div id="mensajes"></div>
@@ -248,3 +333,5 @@ iniciar();
 </body>
 </html>
 """
+
+LANDING_HTML = LANDING_HTML.replace("___PASOS_Y_MUESTRAS___", _PASOS_HTML + _MUESTRAS_HTML)
