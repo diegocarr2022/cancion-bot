@@ -28,12 +28,24 @@ clientes reales sin permiso). Vacia por default - la seccion de muestras se
 oculta sola hasta que se carguen 1-2 URLs reales aca.
 """
 
-# Los archivos van directo en app/static/ (Diego los baja de Suno y los sube
-# el mismo con estos nombres exactos, sin pasar por el flujo de pago) - la
-# seccion de muestras se activa sola en cuanto los dos archivos existen.
-SAMPLE_AUDIO_URLS: list[dict] = [
-    {"titulo": "Cumpleaños de mamá", "url": "/static/audio1.mp3"},
-    {"titulo": "Aniversario de pareja", "url": "/static/audio2.mp3"},
+# Reemplazado por SAMPLE_STYLES (grid de 6 generos, ago 2026) - se deja vacia
+# para no mostrar una seccion duplicada/con audios que ya no existen con
+# esos nombres.
+SAMPLE_AUDIO_URLS: list[dict] = []
+
+# Grid de 6 estilos musicales de muestra (ago 2026) - reemplaza/complementa
+# la seccion anterior de 2 muestras genericas con un catalogo de generos
+# reales, cada uno con su propia imagen + audio, para que el cliente vea de
+# entrada la variedad de estilos que puede pedir y lo emocione mas la compra.
+# Igual que SAMPLE_AUDIO_URLS: son canciones DEMO generadas para mostrar en
+# la landing, nunca canciones de clientes reales.
+SAMPLE_STYLES: list[dict] = [
+    {"nombre": "Bachata", "imagen": "/static/bachata.png", "audio": "/static/bachata.mp3"},
+    {"nombre": "Corrido Tumbado", "imagen": "/static/corrido_tumbado.png", "audio": "/static/corrido_tumbado.mp3"},
+    {"nombre": "Norteño", "imagen": "/static/nortena.png", "audio": "/static/nortena.mp3"},
+    {"nombre": "Cumbia", "imagen": "/static/cumbia.png", "audio": "/static/cumbia.mp3"},
+    {"nombre": "Rock/Pop", "imagen": "/static/rock.png", "audio": "/static/rock.mp3"},
+    {"nombre": "Balada", "imagen": "/static/balada.png", "audio": "/static/balada.mp3"},
 ]
 
 _PASOS_HTML = """
@@ -80,6 +92,28 @@ if SAMPLE_AUDIO_URLS:
     """
 else:
     _MUESTRAS_HTML = ""
+
+if SAMPLE_STYLES:
+    _tarjetas_estilo = "".join(
+        f"""
+        <div class="estilo">
+          <img src="{e['imagen']}" alt="{e['nombre']}" loading="lazy">
+          <p class="estilo-nombre">{e['nombre']}</p>
+          <audio controls preload="none" src="{e['audio']}"></audio>
+        </div>
+        """
+        for e in SAMPLE_STYLES
+    )
+    _ESTILOS_HTML = f"""
+    <div class="card" id="estilos">
+      <h2 class="pasos-titulo">Elige el estilo que más te guste</h2>
+      <div class="estilos-grid">
+        {_tarjetas_estilo}
+      </div>
+    </div>
+    """
+else:
+    _ESTILOS_HTML = ""
 
 # NOTA: LANDING_HTML es un string NORMAL (no f-string) a proposito - tiene
 # mucho CSS/JS con llaves "{ }" sueltas que romperian un f-string. El bloque
@@ -137,6 +171,31 @@ LANDING_HTML = """<!DOCTYPE html>
     vertical-align: middle; margin-right: 8px;
   }
   @keyframes girar { to { transform: rotate(360deg); } }
+
+  .chat-titulo { font-size: 16px; font-weight: 700; margin: 0 0 12px; text-align: center; }
+
+  @keyframes rebotar {
+    0%, 100% { transform: translateY(0); }
+    30% { transform: translateY(-6px); }
+    50% { transform: translateY(0); }
+    65% { transform: translateY(-3px); }
+    80% { transform: translateY(0); }
+  }
+  .fila-input button.rebote { animation: rebotar 0.6s ease; }
+
+  /* Indicador de "escribiendo..." mientras se espera la respuesta - sin esto
+     parece que el chat no hace nada mientras Claude procesa. */
+  .msg.escribiendo { display: flex; align-items: center; gap: 4px; padding: 14px; }
+  .punto {
+    width: 7px; height: 7px; border-radius: 50%; background: #c7b8a0;
+    animation: pulso 1.2s infinite ease-in-out;
+  }
+  .punto:nth-child(2) { animation-delay: 0.2s; }
+  .punto:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes pulso {
+    0%, 60%, 100% { opacity: 0.3; transform: scale(0.85); }
+    30% { opacity: 1; transform: scale(1); }
+  }
   footer { text-align: center; font-size: 12px; color: #b3a58d; margin-top: 24px; }
   footer a { color: #b3a58d; }
 
@@ -155,6 +214,17 @@ LANDING_HTML = """<!DOCTYPE html>
   .muestra:last-child { margin-bottom: 0; }
   .muestra-titulo { font-size: 14px; font-weight: 600; margin: 0 0 6px; }
   .muestra audio { width: 100%; }
+
+  .estilos-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 8px;
+  }
+  .estilo { text-align: center; }
+  .estilo img {
+    width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 10px;
+    display: block;
+  }
+  .estilo-nombre { font-size: 12px; font-weight: 600; margin: 6px 0 4px; }
+  .estilo audio { width: 100%; height: 28px; }
 </style>
 </head>
 <body>
@@ -166,6 +236,7 @@ LANDING_HTML = """<!DOCTYPE html>
   ___PASOS_Y_MUESTRAS___
 
   <div class="card" id="chat">
+    <p class="chat-titulo">Comienza aquí...</p>
     <div id="mensajes"></div>
     <div class="fila-input">
       <input type="text" id="input-mensaje" placeholder="Escribe aquí..." disabled>
@@ -282,15 +353,36 @@ function mostrarDescarga(audioUrls) {
   $("descarga-box").style.display = "block";
 }
 
+function mostrarEscribiendo() {
+  const div = document.createElement("div");
+  div.className = "msg bot escribiendo";
+  div.id = "indicador-escribiendo";
+  div.innerHTML = '<span class="punto"></span><span class="punto"></span><span class="punto"></span>';
+  $("mensajes").appendChild(div);
+  $("mensajes").scrollTop = $("mensajes").scrollHeight;
+}
+
+function ocultarEscribiendo() {
+  const el = document.getElementById("indicador-escribiendo");
+  if (el) el.remove();
+}
+
 async function enviarTurno(texto) {
   if (texto) agregarMensaje(texto, "user");
   $("btn-enviar").disabled = true;
+  mostrarEscribiendo();
 
-  const resp = await fetch("/web/chat", {
-    method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({session_id: sessionId, message: texto}),
-  });
-  const data = await resp.json();
+  let data;
+  try {
+    const resp = await fetch("/web/chat", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({session_id: sessionId, message: texto}),
+    });
+    data = await resp.json();
+  } finally {
+    ocultarEscribiendo();
+  }
+
   (data.mensajes || []).forEach((m) => agregarMensaje(m, "bot"));
 
   if (data.listo_para_pagar && data.payment_url) {
@@ -301,6 +393,16 @@ async function enviarTurno(texto) {
   }
   $("btn-enviar").disabled = false;
 }
+
+// Boton "Enviar" hace un pequeño rebote cada pocos segundos cuando esta
+// habilitado, para llamar la atencion de que hay que escribir algo (antes
+// el chat se sentia "quieto" y no invitaba a interactuar).
+setInterval(() => {
+  const btn = $("btn-enviar");
+  if (btn.disabled) return;
+  btn.classList.add("rebote");
+  setTimeout(() => btn.classList.remove("rebote"), 650);
+}, 4000);
 
 function iniciarPolling() {
   if (pollTimer) return;
@@ -334,4 +436,6 @@ iniciar();
 </html>
 """
 
-LANDING_HTML = LANDING_HTML.replace("___PASOS_Y_MUESTRAS___", _PASOS_HTML + _MUESTRAS_HTML)
+LANDING_HTML = LANDING_HTML.replace(
+    "___PASOS_Y_MUESTRAS___", _PASOS_HTML + _ESTILOS_HTML + _MUESTRAS_HTML
+)
