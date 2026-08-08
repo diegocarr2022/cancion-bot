@@ -106,7 +106,7 @@ if SAMPLE_STYLES:
     )
     _ESTILOS_HTML = f"""
     <div class="card" id="estilos">
-      <h2 class="pasos-titulo">Elige el estilo que más te guste</h2>
+      <h2 class="pasos-titulo">Algunos ejemplos de estilos</h2>
       <div class="estilos-grid">
         {_tarjetas_estilo}
       </div>
@@ -428,6 +428,16 @@ $("btn-enviar").addEventListener("click", () => {
 });
 $("input-mensaje").addEventListener("keydown", (e) => {
   if (e.key === "Enter") $("btn-enviar").click();
+});
+
+// Al reproducir un audio de muestra (estilos o pasos), pausa cualquier otro
+// que este sonando - sin esto se pueden solapar varias canciones a la vez.
+document.querySelectorAll("audio").forEach((audio) => {
+  audio.addEventListener("play", () => {
+    document.querySelectorAll("audio").forEach((otro) => {
+      if (otro !== audio) otro.pause();
+    });
+  });
 });
 
 iniciar();
