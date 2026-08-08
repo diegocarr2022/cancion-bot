@@ -98,3 +98,13 @@ POLL_INTERVAL_STUCK_SECONDS = int(os.environ.get("POLL_INTERVAL_STUCK_SECONDS", 
 # llamadas HTTP repetidas sin fin - ver el diagnostico de fuga de memoria
 # de ago 2026.
 PENDING_PAYMENT_MAX_HORAS = int(os.environ.get("PENDING_PAYMENT_MAX_HORAS", "48"))
+
+# Backoff: durante la primera hora de un pago pendiente se revisa en CADA
+# vuelta del loop (POLL_INTERVAL_SECONDS) porque es cuando es mas probable
+# que el cliente realmente termine de pagar. Pasada esa hora, se espacia a
+# revisar cada PENDING_PAYMENT_BACKOFF_MINUTOS minutos en vez de cada
+# vuelta - asi, si se acumulan varios pedidos abandonados al mismo tiempo
+# (ej. una campana con mucho trafico), no se multiplica el numero de
+# llamadas HTTP por cada uno de ellos cada minuto.
+PENDING_PAYMENT_BACKOFF_HORAS = float(os.environ.get("PENDING_PAYMENT_BACKOFF_HORAS", "1"))
+PENDING_PAYMENT_BACKOFF_MINUTOS = int(os.environ.get("PENDING_PAYMENT_BACKOFF_MINUTOS", "30"))

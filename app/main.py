@@ -22,6 +22,8 @@ from app.config import (
     POLL_INTERVAL_SECONDS,
     POLL_INTERVAL_STUCK_SECONDS,
     PENDING_PAYMENT_MAX_HORAS,
+    PENDING_PAYMENT_BACKOFF_HORAS,
+    PENDING_PAYMENT_BACKOFF_MINUTOS,
 )
 from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
@@ -58,6 +60,22 @@ def _horas_desde(iso_timestamp: str) -> float:
     except (TypeError, ValueError):
         return 0.0
     return (datetime.utcnow() - entonces).total_seconds() / 3600
+
+
+def _debe_chequear_pago(order: dict) -> bool:
+    """Decide si toca consultar dLocal Go en esta vuelta del loop, o si
+    conviene esperar (backoff). Durante la primera hora se chequea siempre
+    (PENDING_PAYMENT_BACKOFF_HORAS); despues, solo si paso al menos
+    PENDING_PAYMENT_BACKOFF_MINUTOS desde el ultimo chequeo real - asi varios
+    pedidos abandonados acumulados no multiplican las llamadas HTTP por
+    minuto sin limite."""
+    if _horas_desde(order["updated_at"]) < PENDING_PAYMENT_BACKOFF_HORAS:
+        return True
+    ultimo_chequeo = order.get("last_checked_at")
+    if not ultimo_chequeo:
+        return True
+    minutos_desde_chequeo = _horas_desde(ultimo_chequeo) * 60
+    return minutos_desde_chequeo >= PENDING_PAYMENT_BACKOFF_MINUTOS
 
 
 def _memoria_mb() -> float:
@@ -691,8 +709,12 @@ async def check_payment_status(order: dict):
         )
         return
 
+    if not _debe_chequear_pago(order):
+        return  # todavia no toca (backoff) - se revisa de nuevo mas adelante
+
     try:
         payment = await get_payment(order["payment_request_id"])
+        db.touch_last_checked(order["chat_id"], datetime.utcnow().isoformat())
     except Exception:
         log.exception("Error consultando pago pendiente para chat_id=%s", order["chat_id"])
         return
@@ -789,8 +811,12 @@ async def check_web_payment_status(order: dict):
         )
         return
 
+    if not _debe_chequear_pago(order):
+        return  # todavia no toca (backoff) - se revisa de nuevo mas adelante
+
     try:
         payment = await get_payment(order["payment_request_id"])
+        db.touch_last_checked_web(order["session_id"], datetime.utcnow().isoformat())
     except Exception:
         log.exception("Error consultando pago web pendiente para session_id=%s", order["session_id"])
         return

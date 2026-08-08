@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS orders (
     paid INTEGER NOT NULL DEFAULT 0,
     suno_task_id TEXT,
     delivered INTEGER NOT NULL DEFAULT 0,
+    last_checked_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -83,6 +84,7 @@ CREATE TABLE IF NOT EXISTS web_orders (
     delivered INTEGER NOT NULL DEFAULT 0,
     delivered_email INTEGER NOT NULL DEFAULT 0,
     source TEXT,
+    last_checked_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -126,6 +128,13 @@ MIGRATIONS = [
     # PAISES_SOPORTADOS en app/config.py) - default Mexico para pedidos viejos.
     "ALTER TABLE web_orders ADD COLUMN country TEXT NOT NULL DEFAULT 'MX'",
     "ALTER TABLE web_orders ADD COLUMN currency TEXT NOT NULL DEFAULT 'MXN'",
+    # Cuando fue la ultima vez que efectivamente se le pregunto a dLocal Go
+    # por este pago (distinto de updated_at, que marca cuando se genero el
+    # link) - se usa para espaciar los chequeos de pagos viejos sin resolver
+    # y no perder tiempo/memoria reconsultando muy seguido algo que probablemente
+    # ya se abandono. Ver PENDING_PAYMENT_BACKOFF_* en config.py.
+    "ALTER TABLE orders ADD COLUMN last_checked_at TEXT",
+    "ALTER TABLE web_orders ADD COLUMN last_checked_at TEXT",
 ]
 
 
@@ -295,6 +304,25 @@ def get_bot_clicks_total() -> int:
     with get_conn() as conn:
         row = conn.execute("SELECT COUNT(*) AS n FROM clicks WHERE is_bot = 1").fetchone()
         return row["n"]
+
+
+def touch_last_checked(chat_id: int, timestamp: str):
+    """Actualiza SOLO last_checked_at, sin pasar por update_order() (que
+    siempre pisa 'updated_at' en cada llamada). Es a proposito: 'updated_at'
+    tiene que seguir reflejando cuando se genero el link de pago (para el
+    corte de PENDING_PAYMENT_MAX_HORAS en main.py) - si un simple chequeo de
+    backoff lo reiniciara cada vez, un pago abandonado nunca llegaria a
+    vencerse."""
+    with get_conn() as conn:
+        conn.execute("UPDATE orders SET last_checked_at = ? WHERE chat_id = ?", (timestamp, chat_id))
+
+
+def touch_last_checked_web(session_id: str, timestamp: str):
+    """Ver touch_last_checked() - misma logica para web_orders."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE web_orders SET last_checked_at = ? WHERE session_id = ?", (timestamp, session_id)
+        )
 
 
 def update_order(chat_id: int, **fields):
