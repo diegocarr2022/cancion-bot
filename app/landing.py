@@ -137,7 +137,7 @@ if SAMPLE_AUDIO_URLS:
         f"""
         <div class="muestra">
           <p class="muestra-titulo">🎵 {m['titulo']}</p>
-          <audio controls preload="none" src="{m['url']}"></audio>
+          <audio controls preload="metadata" src="{m['url']}"></audio>
         </div>
         """
         for m in SAMPLE_AUDIO_URLS
@@ -157,7 +157,7 @@ if SAMPLE_STYLES:
         <div class="estilo">
           <img src="{e['imagen']}" alt="{e['nombre']}" loading="lazy">
           <p class="estilo-nombre">{e['nombre']}</p>
-          <audio controls preload="none" src="{e['audio']}"></audio>
+          <audio controls preload="metadata" src="{e['audio']}"></audio>
         </div>
         """
         for e in SAMPLE_STYLES
@@ -911,32 +911,32 @@ ___META_PIXEL_SCRIPT___
       <div class="sample">
         <img src="/static/hiphop.jpg" alt="Hip-Hop / R&amp;B">
         <div><p class="sample-name">Hip-Hop / R&amp;B</p><p class="sample-genre">America's #1 streamed genre</p></div>
-        <audio controls preload="none" src="/static/hiphop.mp3"></audio>
+        <audio controls preload="metadata" src="/static/hiphop.mp3"></audio>
       </div>
       <div class="sample">
         <img src="/static/poprock.jpg" alt="Pop / Rock">
         <div><p class="sample-name">Pop / Rock</p><p class="sample-genre">Anthemic · Radio-ready</p></div>
-        <audio controls preload="none" src="/static/poprock.mp3"></audio>
+        <audio controls preload="metadata" src="/static/poprock.mp3"></audio>
       </div>
       <div class="sample">
         <img src="/static/latin.jpg" alt="Latin">
         <div><p class="sample-name">Latin</p><p class="sample-genre">Reggaetón-flavored</p></div>
-        <audio controls preload="none" src="/static/latin.mp3"></audio>
+        <audio controls preload="metadata" src="/static/latin.mp3"></audio>
       </div>
       <div class="sample">
         <img src="/static/country.jpg" alt="Country">
         <div><p class="sample-name">Country</p><p class="sample-genre">Storytelling at its core</p></div>
-        <audio controls preload="none" src="/static/country.mp3"></audio>
+        <audio controls preload="metadata" src="/static/country.mp3"></audio>
       </div>
       <div class="sample">
         <img src="/static/metal.jpg" alt="Metal">
         <div><p class="sample-name">Metal</p><p class="sample-genre">Heavy · Unapologetic</p></div>
-        <audio controls preload="none" src="/static/metal.mp3"></audio>
+        <audio controls preload="metadata" src="/static/metal.mp3"></audio>
       </div>
       <div class="sample">
         <img src="/static/bigband.jpg" alt="Big Band">
         <div><p class="sample-name">Big Band</p><p class="sample-genre">Sinatra-style crooner</p></div>
-        <audio controls preload="none" src="/static/bigband.mp3"></audio>
+        <audio controls preload="metadata" src="/static/bigband.mp3"></audio>
       </div>
     </div>
   </section>
