@@ -74,7 +74,8 @@ async def confirmar_pago_web(session_id: str):
 
     try:
         result = await generate_custom_song(
-            lyric=order["final_lyric"], title=order["final_title"], style=order["final_style"]
+            lyric=order["final_lyric"], title=order["final_title"], style=order["final_style"],
+            gender=order.get("final_gender"),
         )
         task_id = result.get("task_id") or result.get("id")
         db.update_web_order(session_id, suno_task_id=task_id)

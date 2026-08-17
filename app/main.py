@@ -733,6 +733,7 @@ async def admin_orden_web(session_id: str, _: bool = Depends(_verificar_admin)):
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
     transcripcion = _render_transcript_html(db.get_web_messages(session_id))
     letra = html.escape(order.get("final_lyric") or "")
+    voz_pedida = {"f": "Femenina", "m": "Masculina"}.get(order.get("final_gender"), "Sin preferencia especificada")
     return f"""
     <html>
       <head><meta charset="utf-8"><title>Pedido web {session_id[:8]}</title>
@@ -753,6 +754,7 @@ async def admin_orden_web(session_id: str, _: bool = Depends(_verificar_admin)):
           <h2>Letra aprobada</h2>
           <p><strong>Título:</strong> {html.escape(order.get('final_title') or '—')}</p>
           <p><strong>Estilo:</strong> {html.escape(order.get('final_style') or '—')}</p>
+          <p><strong>Voz pedida:</strong> {voz_pedida}</p>
           <div style="white-space:pre-wrap; font-size:14px; line-height:1.6; margin-top:10px;">{letra or '<span style="color:#9ca3af;">Sin letra aprobada todavía.</span>'}</div>
         </div>
         <div class="card">

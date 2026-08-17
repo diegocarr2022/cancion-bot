@@ -165,6 +165,15 @@ MIGRATIONS = [
     "ALTER TABLE web_orders ADD COLUMN video_path TEXT",
     "ALTER TABLE web_orders ADD COLUMN video_url TEXT",
     "ALTER TABLE web_orders ADD COLUMN video_error TEXT",
+    # final_gender ("f"/"m"/NULL): genero de voz que el cliente pidio,
+    # capturado aparte de "style" para poder mandarselo a Suno en su campo
+    # dedicado (ver app/suno_client.py) en vez de depender de que lo respete
+    # dentro del texto libre de estilo - de ahi salio una entrega con la voz
+    # equivocada. Por ahora solo lo llena el flujo en ingles (Tunecraft); se
+    # agrega tambien en "orders" (Telegram) por consistencia con el resto de
+    # las columnas final_*, aunque todavia no se use ahi.
+    "ALTER TABLE web_orders ADD COLUMN final_gender TEXT",
+    "ALTER TABLE orders ADD COLUMN final_gender TEXT",
 ]
 
 
@@ -540,8 +549,8 @@ def set_web_messages(session_id: str, messages: list):
     update_web_order(session_id, messages=json.dumps(messages, ensure_ascii=False))
 
 
-def save_web_final_letra(session_id: str, title: str, style: str, lyric: str):
-    update_web_order(session_id, final_title=title, final_style=style, final_lyric=lyric)
+def save_web_final_letra(session_id: str, title: str, style: str, lyric: str, gender: str | None = None):
+    update_web_order(session_id, final_title=title, final_style=style, final_lyric=lyric, final_gender=gender)
 
 
 def find_web_by_payment_request_id(payment_request_id: str):

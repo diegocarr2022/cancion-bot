@@ -75,6 +75,12 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
         lyric = tool_input.get("lyric", "")
         email = (tool_input.get("email") or "").strip()
         customer_name = (tool_input.get("customer_name") or "").strip()
+        # solo lo llena el tool schema en ingles (WEB_CONTENT_TOOLS_EN) - el
+        # de ES no tiene este campo, asi que aca siempre da None y no cambia
+        # nada del flujo en espanol.
+        vocal_gender = tool_input.get("vocal_gender")
+        if vocal_gender not in ("f", "m"):
+            vocal_gender = None
         # misma red de seguridad que en Telegram: separar estilo pegado al
         # inicio de la letra si Claude lo mezclo por error.
         idx = lyric.find("[")
@@ -84,7 +90,7 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
                 lyric = lyric[idx:].lstrip()
                 style = f"{style} {prefijo}".strip() if style else prefijo
 
-        db.save_web_final_letra(session_id, title, style, lyric)
+        db.save_web_final_letra(session_id, title, style, lyric, gender=vocal_gender)
         if email and "@" in email:
             db.update_web_order(session_id, email=email)
         else:

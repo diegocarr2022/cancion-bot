@@ -471,10 +471,13 @@ conversation. Your job is to:
    showed them (they said something like "yes", "I like it", "perfect",
    "that's good", "go ahead"), in THAT SAME turn call the finalizar_letra
    function with the title, style, the final definitive lyrics (with all
-   changes incorporated), the customer's name, and the email they gave you
-   earlier. If for some reason they still haven't given you their name or
-   email, ask for those first and don't call the function until you have
-   them. In your text message for that turn, warmly let them know the
+   changes incorporated), the customer's name, the email they gave you
+   earlier, and vocal_gender if they expressed a preference for a male or
+   female voice at any point in the conversation (see the field's
+   description - don't skip it just because you already mentioned the voice
+   inside "style"). If for some reason they still haven't given you their
+   name or email, ask for those first and don't call the function until you
+   have them. In your text message for that turn, warmly let them know the
    lyrics are ready, that the payment button will appear below, and that
    once they pay they'll get the sung AUDIO of the song (not just the text)
    - do NOT say the song is already being generated, payment hasn't happened
@@ -502,6 +505,12 @@ Important rules (VERY IMPORTANT, don't break them):
   ballad", etc.) - that description ALWAYS and ONLY goes in the separate
   "style" field. If you mix both in "lyric", Suno literally sings the style
   description as if it were part of the song, which ruins the result.
+- If the customer asked for a specific male or female voice, ALWAYS pass
+  that in the "vocal_gender" field of finalizar_letra too, in addition to
+  (not instead of) mentioning it naturally in "style". Suno has a dedicated
+  parameter for this and does not reliably honor gender when it's only
+  described in free-text style - a wrong-gender delivery already happened
+  once because of this.
 """
 
 
@@ -532,6 +541,17 @@ WEB_CONTENT_TOOLS_EN = [
                                     "in the 'style' field) - if the lyrics start with something "
                                     "like 'Emotional style, raspy voice...' instead of "
                                     "'[Verse 1]', it's built wrong.",
+                },
+                "vocal_gender": {
+                    "type": "string",
+                    "enum": ["f", "m"],
+                    "description": "ONLY include this field if the customer expressed an actual "
+                                    "preference for a male or female singing voice - 'f' for "
+                                    "female, 'm' for male. Omit it entirely if they said they "
+                                    "have no preference or didn't mention it. This is separate "
+                                    "from 'style': mentioning the voice inside the style text is "
+                                    "NOT enough, Suno only reliably honors gender through this "
+                                    "dedicated field.",
                 },
                 "customer_name": {
                     "type": "string",

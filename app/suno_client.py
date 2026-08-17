@@ -31,7 +31,29 @@ BASE = "https://api.acedata.cloud/suno"
 GENERATE_TIMEOUT = httpx.Timeout(connect=15.0, read=120.0, write=15.0, pool=15.0)
 
 
-async def generate_custom_song(lyric: str, title: str, style: str, model: str = "chirp-v3-5") -> dict:
+async def generate_custom_song(
+    lyric: str, title: str, style: str, model: str = "chirp-v4-5", gender: str | None = None
+) -> dict:
+    """gender: "f" (voz femenina) o "m" (voz masculina) - solo soportado en
+    modelos v4.5+ (por eso el default ya no es chirp-v3-5, que ademas topaba
+    la duracion en 120 segundos). Antes de este cambio, el pedido de genero
+    de voz del cliente solo se le mandaba a Suno mezclado dentro del texto
+    libre de "style" (ej. "...female vocals..."), donde Suno no lo respeta de
+    forma confiable - de ahi salio una entrega con la voz equivocada. Se deja
+    afuera del payload si no se especifica, para no forzar un valor cuando al
+    cliente no le importa."""
+    payload = {
+        "action": "generate",
+        "model": model,
+        "custom": True,
+        "lyric": lyric,
+        "title": title,
+        "style": style,
+        "async": True,
+    }
+    if gender in ("f", "m"):
+        payload["gender"] = gender
+
     async with httpx.AsyncClient(timeout=GENERATE_TIMEOUT) as client:
         resp = await client.post(
             f"{BASE}/audios",
@@ -40,15 +62,7 @@ async def generate_custom_song(lyric: str, title: str, style: str, model: str = 
                 "accept": "application/json",
                 "content-type": "application/json",
             },
-            json={
-                "action": "generate",
-                "model": model,
-                "custom": True,
-                "lyric": lyric,
-                "title": title,
-                "style": style,
-                "async": True,
-            },
+            json=payload,
         )
         resp.raise_for_status()
         return resp.json()
