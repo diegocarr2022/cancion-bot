@@ -32,16 +32,19 @@ GENERATE_TIMEOUT = httpx.Timeout(connect=15.0, read=120.0, write=15.0, pool=15.0
 
 
 async def generate_custom_song(
-    lyric: str, title: str, style: str, model: str = "chirp-v4-5", gender: str | None = None
+    lyric: str, title: str, style: str, model: str = "chirp-v5-5", gender: str | None = None
 ) -> dict:
     """gender: "f" (voz femenina) o "m" (voz masculina) - solo soportado en
     modelos v4.5+ (por eso el default ya no es chirp-v3-5, que ademas topaba
-    la duracion en 120 segundos). Antes de este cambio, el pedido de genero
-    de voz del cliente solo se le mandaba a Suno mezclado dentro del texto
-    libre de "style" (ej. "...female vocals..."), donde Suno no lo respeta de
-    forma confiable - de ahi salio una entrega con la voz equivocada. Se deja
-    afuera del payload si no se especifica, para no forzar un valor cuando al
-    cliente no le importa."""
+    la duracion en 120 segundos). chirp-v5-5 en vez de v4-5: mismo rango de
+    precio en AceDataCloud (0.56 vs 0.47 creditos, diferencia marginal contra
+    el precio de venta) y notablemente mejor calidad de voz - confirmado
+    escuchando las muestras reales usadas en la landing en ingles. Antes de
+    este cambio, el pedido de genero de voz del cliente solo se le mandaba a
+    Suno mezclado dentro del texto libre de "style" (ej. "...female
+    vocals..."), donde Suno no lo respeta de forma confiable - de ahi salio
+    una entrega con la voz equivocada. Se deja afuera del payload si no se
+    especifica, para no forzar un valor cuando al cliente no le importa."""
     payload = {
         "action": "generate",
         "model": model,
