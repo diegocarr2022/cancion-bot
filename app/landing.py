@@ -906,37 +906,37 @@ ___META_PIXEL_SCRIPT___
   <section id="samples">
     <span class="kicker">Side B</span>
     <h2 class="section-title">Six sounds, one story</h2>
-    <p style="font-size:13.5px; color:var(--ink-soft); margin:-10px 0 20px;">Whatever their taste, we can write and record it that way. Samples landing soon for each style.</p>
+    <p style="font-size:13.5px; color:var(--ink-soft); margin:-10px 0 20px;">Whatever their taste, we can write and record it that way. Press play on any of these.</p>
     <div class="sample-list">
-      <div class="sample soon">
-        <img src="/static/rock.jpg" alt="Hip-Hop / R&amp;B">
+      <div class="sample">
+        <img src="/static/hiphop.jpg" alt="Hip-Hop / R&amp;B">
         <div><p class="sample-name">Hip-Hop / R&amp;B</p><p class="sample-genre">America's #1 streamed genre</p></div>
-        <span class="sample-soon-tag">Sample soon</span>
+        <audio controls preload="none" src="/static/hiphop.mp3"></audio>
       </div>
-      <div class="sample soon">
-        <img src="/static/rock.jpg" alt="Pop / Rock">
+      <div class="sample">
+        <img src="/static/poprock.jpg" alt="Pop / Rock">
         <div><p class="sample-name">Pop / Rock</p><p class="sample-genre">Anthemic · Radio-ready</p></div>
-        <span class="sample-soon-tag">Sample soon</span>
+        <audio controls preload="none" src="/static/poprock.mp3"></audio>
       </div>
-      <div class="sample soon">
-        <img src="/static/bachata.jpg" alt="Latin">
+      <div class="sample">
+        <img src="/static/latin.jpg" alt="Latin">
         <div><p class="sample-name">Latin</p><p class="sample-genre">Reggaetón-flavored</p></div>
-        <span class="sample-soon-tag">Sample soon</span>
+        <audio controls preload="none" src="/static/latin.mp3"></audio>
       </div>
-      <div class="sample soon">
-        <img src="/static/bachata.jpg" alt="Country">
+      <div class="sample">
+        <img src="/static/country.jpg" alt="Country">
         <div><p class="sample-name">Country</p><p class="sample-genre">Storytelling at its core</p></div>
-        <span class="sample-soon-tag">Sample soon</span>
+        <audio controls preload="none" src="/static/country.mp3"></audio>
       </div>
-      <div class="sample soon">
-        <img src="/static/rock.jpg" alt="Metal">
+      <div class="sample">
+        <img src="/static/metal.jpg" alt="Metal">
         <div><p class="sample-name">Metal</p><p class="sample-genre">Heavy · Unapologetic</p></div>
-        <span class="sample-soon-tag">Sample soon</span>
+        <audio controls preload="none" src="/static/metal.mp3"></audio>
       </div>
-      <div class="sample soon">
-        <img src="/static/balada.jpg" alt="Big Band">
+      <div class="sample">
+        <img src="/static/bigband.jpg" alt="Big Band">
         <div><p class="sample-name">Big Band</p><p class="sample-genre">Sinatra-style crooner</p></div>
-        <span class="sample-soon-tag">Sample soon</span>
+        <audio controls preload="none" src="/static/bigband.mp3"></audio>
       </div>
     </div>
   </section>
