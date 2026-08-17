@@ -139,9 +139,6 @@ async def health():
 @app.get("/", response_class=HTMLResponse)
 async def raiz(request: Request, lang: str | None = None):
     resolved_lang = (lang or "").strip().lower()
-    if resolved_lang not in ("es", "en"):
-        accept_lang = request.headers.get("accept-language", "").lower()
-        resolved_lang = "es" if accept_lang.startswith("es") else "en"
     return LANDING_HTML_ES if resolved_lang == "es" else LANDING_HTML_EN
 
 
