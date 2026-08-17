@@ -65,6 +65,13 @@ async def create_order(
                     "cancel_url": cancel_url,
                     "user_action": "PAY_NOW",
                     "shipping_preference": "NO_SHIPPING",
+                    # Sin esto PayPal muestra primero la pantalla de login y
+                    # deja "pagar con tarjeta sin cuenta" como link chiquito
+                    # abajo - mal para trafico frio de Google Ads que en su
+                    # mayoria no tiene cuenta de PayPal. "BILLING" abre
+                    # directo el formulario de tarjeta (sigue habiendo un
+                    # link para loguearse, por si si tienen cuenta).
+                    "landing_page": "BILLING",
                 },
             },
         )
