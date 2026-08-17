@@ -174,6 +174,18 @@ MIGRATIONS = [
     # las columnas final_*, aunque todavia no se use ahi.
     "ALTER TABLE web_orders ADD COLUMN final_gender TEXT",
     "ALTER TABLE orders ADD COLUMN final_gender TEXT",
+    # UTM + gclid del link del anuncio (ver iniciar() en landing.py) - antes
+    # solo se guardaba un "source" custom y el fbclid de Meta; faltaba lo
+    # necesario para atribuir trafico a campanas/grupos de anuncios reales de
+    # Google Ads (gclid) y para saber que campana/anuncio especifico convirtio
+    # (utm_campaign/utm_content), que es la base para poder mostrar copy
+    # distinto por grupo de anuncios mas adelante.
+    "ALTER TABLE web_orders ADD COLUMN utm_source TEXT",
+    "ALTER TABLE web_orders ADD COLUMN utm_medium TEXT",
+    "ALTER TABLE web_orders ADD COLUMN utm_campaign TEXT",
+    "ALTER TABLE web_orders ADD COLUMN utm_content TEXT",
+    "ALTER TABLE web_orders ADD COLUMN utm_term TEXT",
+    "ALTER TABLE web_orders ADD COLUMN gclid TEXT",
 ]
 
 
@@ -429,6 +441,39 @@ def get_all_orders(limit: int = 300):
         return [dict(r) for r in rows]
 
 
+def reset_all():
+    """Borra TODO el historial (Telegram + web + clicks) - usado desde el
+    boton de reset del panel de admin, para arrancar en limpio despues de
+    pruebas/aprobacion de Facebook. Irreversible - no hay respaldo."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM orders")
+        conn.execute("DELETE FROM web_orders")
+        conn.execute("DELETE FROM clicks")
+
+
+def get_recent_deliveries(limit: int = 20):
+    """Ultimas canciones entregadas de AMBOS canales juntos (Telegram + web) -
+    get_stats()/get_web_stats() cuentan cada canal por separado, asi que no
+    hay ningun lugar que muestre "lo ultimo que se entrego" sin importar de
+    donde vino."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT 'telegram' AS canal, CAST(chat_id AS TEXT) AS id, final_title AS titulo,
+                   amount_mxn AS monto, 'MXN' AS moneda, updated_at
+            FROM orders WHERE step = 'entregado'
+            UNION ALL
+            SELECT 'web' AS canal, session_id AS id, final_title AS titulo,
+                   amount_mxn AS monto, currency AS moneda, updated_at
+            FROM web_orders WHERE step = 'entregado'
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def get_stats():
     """Resumen agregado para el panel de admin: ventas, ingresos, embudo."""
     with get_conn() as conn:
@@ -512,6 +557,12 @@ def create_web_order(
     client_user_agent: str | None = None,
     language: str = "es",
     tier: str = "song",
+    utm_source: str | None = None,
+    utm_medium: str | None = None,
+    utm_campaign: str | None = None,
+    utm_content: str | None = None,
+    utm_term: str | None = None,
+    gclid: str | None = None,
 ):
     now = datetime.utcnow().isoformat()
     with get_conn() as conn:
@@ -520,11 +571,13 @@ def create_web_order(
             INSERT INTO web_orders
                 (session_id, email, step, messages, source, country, currency,
                  fbclid, fbp, client_ip, client_user_agent, language, tier,
+                 utm_source, utm_medium, utm_campaign, utm_content, utm_term, gclid,
                  created_at, updated_at)
-            VALUES (?, ?, 'charlando', '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, 'charlando', '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (session_id, email, source, country, currency,
-             fbclid, fbp, client_ip, client_user_agent, language, tier, now, now),
+             fbclid, fbp, client_ip, client_user_agent, language, tier,
+             utm_source, utm_medium, utm_campaign, utm_content, utm_term, gclid, now, now),
         )
 
 

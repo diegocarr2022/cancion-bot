@@ -262,11 +262,24 @@ async def web_session(request: Request):
     client_ip = request.client.host if request.client else None
     client_user_agent = request.headers.get("user-agent")
 
+    # utm_*/gclid: parametros estandar de Google Ads (gclid = su version de
+    # fbclid, para atribucion) - antes solo se guardaba el "source" custom,
+    # sin forma de saber de que campana/grupo de anuncios especifico vino
+    # cada sesion. Se guardan tal cual vienen en la URL, sin validar valores.
+    utm_source = body.get("utm_source")
+    utm_medium = body.get("utm_medium")
+    utm_campaign = body.get("utm_campaign")
+    utm_content = body.get("utm_content")
+    utm_term = body.get("utm_term")
+    gclid = body.get("gclid")
+
     session_id = uuid.uuid4().hex
     db.create_web_order(
         session_id, source=source, country=country_code, currency=precio["currency"],
         fbclid=fbclid, fbp=fbp, client_ip=client_ip, client_user_agent=client_user_agent,
         language=lang, tier=tier,
+        utm_source=utm_source, utm_medium=utm_medium, utm_campaign=utm_campaign,
+        utm_content=utm_content, utm_term=utm_term, gclid=gclid,
     )
     log.info(
         "[web] nueva sesion %s (source=%s, country=%s, currency=%s, lang=%s, tier=%s)",
@@ -565,11 +578,27 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
     bots_filtrados = db.get_bot_clicks_total()
     web_stats = db.get_web_stats()
     web_orders = db.get_all_web_orders(limit=300)
+    entregas_recientes = db.get_recent_deliveries()
     # Ingresos web separados por moneda (no se pueden sumar MXN + PEN + COP
     # como si fueran la misma unidad) - se muestran uno junto al otro.
     ingresos_web_texto = " + ".join(
         f"${fila['total']:.0f} {fila['currency']}" for fila in web_stats["ingresos_por_moneda"]
     ) or "$0"
+
+    filas_entregas = ""
+    for e in entregas_recientes:
+        canal_label = "📱 Telegram" if e["canal"] == "telegram" else "🌐 Web"
+        detalle_href = f"/admin/orden/{e['canal']}/{e['id']}"
+        titulo_e = e.get("titulo") or "—"
+        monto_e = f"${e['monto']:.0f} {e['moneda']}" if e.get("monto") else "—"
+        filas_entregas += f"""
+        <tr>
+          <td>{canal_label}</td>
+          <td><a href="{detalle_href}" style="color:#c2410c; font-weight:600;">{titulo_e}</a></td>
+          <td>{monto_e}</td>
+          <td style="color:#6b7280; font-size:13px;">{(e.get('updated_at') or '')[:16].replace('T', ' ')}</td>
+        </tr>
+        """
 
     filas_web = ""
     for o in web_orders:
@@ -653,7 +682,17 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
         </style>
       </head>
       <body>
-        <h1>🎵 Panel de ventas — Cancion Bot</h1>
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <h1>🎵 Panel de ventas — Cancion Bot</h1>
+          <form method="post" action="/admin/reset-all"
+                onsubmit="return confirm('¿Borrar TODO el historial (Telegram + web + clicks)? Esto no se puede deshacer.');">
+            <button type="submit" style="background:#ef4444; color:white; border:none;
+                    padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600;
+                    cursor:pointer;">🗑️ Borrar todo el historial</button>
+          </form>
+        </div>
+
+        <h2 style="font-size:16px; margin: 0 0 4px;">📱 Telegram (México)</h2>
         <div class="cards">
           <div class="card"><div class="label">Ingresos totales</div>
             <div class="value">${stats['ingresos_mxn']:.0f} MXN</div></div>
@@ -684,6 +723,17 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
           <div class="card"><div class="label">Ingresos</div>
             <div class="value">{ingresos_web_texto}</div></div>
         </div>
+
+        <h2 style="font-size:16px; margin: 32px 0 4px;">🎵 Últimas entregas (todos los canales)</h2>
+        <table style="margin-bottom:32px;">
+          <thead>
+            <tr><th>Canal</th><th>Canción</th><th>Monto</th><th>Entregado</th></tr>
+          </thead>
+          <tbody>
+            {filas_entregas or '<tr><td colspan="4" style="text-align:center; color:#9ca3af;">Sin entregas todavía</td></tr>'}
+          </tbody>
+        </table>
+
         <p style="font-size:12px; color:#9ca3af; margin:-20px 0 12px;">
           Nombre y correo capturados en el chat de la landing - utiles para armar
           audiencias similares (lookalike) en Meta Ads.
@@ -726,6 +776,12 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
     """
 
 
+@app.post("/admin/reset-all")
+async def admin_reset_all(_: bool = Depends(_verificar_admin)):
+    db.reset_all()
+    return RedirectResponse(url="/admin", status_code=303)
+
+
 @app.get("/admin/orden/web/{session_id}", response_class=HTMLResponse)
 async def admin_orden_web(session_id: str, _: bool = Depends(_verificar_admin)):
     order = db.get_web_order(session_id)
@@ -749,6 +805,13 @@ async def admin_orden_web(session_id: str, _: bool = Depends(_verificar_admin)):
           <p><strong>Pasarela:</strong> {html.escape(order.get('gateway') or '—')}</p>
           <p><strong>Estado:</strong> {html.escape(order.get('step') or '—')} · pagado: {'sí' if order.get('paid') else 'no'} · entregado: {'sí' if order.get('delivered') else 'no'}</p>
           <p><strong>Creado:</strong> {(order.get('created_at') or '')[:16].replace('T', ' ')}</p>
+        </div>
+        <div class="card">
+          <h2>Origen / atribución</h2>
+          <p><strong>Source:</strong> {html.escape(order.get('source') or '—')}</p>
+          <p><strong>UTM:</strong> {html.escape(order.get('utm_source') or '—')} / {html.escape(order.get('utm_medium') or '—')} / {html.escape(order.get('utm_campaign') or '—')}</p>
+          <p><strong>UTM content / term:</strong> {html.escape(order.get('utm_content') or '—')} / {html.escape(order.get('utm_term') or '—')}</p>
+          <p><strong>gclid:</strong> {html.escape(order.get('gclid') or '—')} · <strong>fbclid:</strong> {html.escape(order.get('fbclid') or '—')}</p>
         </div>
         <div class="card">
           <h2>Letra aprobada</h2>

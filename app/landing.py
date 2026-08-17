@@ -374,10 +374,19 @@ async function iniciar() {
   // app/meta_capi.py).
   const fbclid = params.get("fbclid") || null;
   const fbp = leerCookie("_fbp");
+  // utm_*: parametros estandar que arman las campañas (Google Ads, etc.);
+  // gclid es el equivalente de fbclid pero de Google Ads, para atribucion.
+  const utm_source = params.get("utm_source") || null;
+  const utm_medium = params.get("utm_medium") || null;
+  const utm_campaign = params.get("utm_campaign") || null;
+  const utm_content = params.get("utm_content") || null;
+  const utm_term = params.get("utm_term") || null;
+  const gclid = params.get("gclid") || null;
 
   const resp = await fetch("/web/session", {
     method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({source, country, fbclid, fbp}),
+    body: JSON.stringify({source, country, fbclid, fbp,
+      utm_source, utm_medium, utm_campaign, utm_content, utm_term, gclid}),
   });
   const data = await resp.json();
   sessionId = data.session_id;
@@ -1016,9 +1025,16 @@ async function iniciar() {
   const country = params.get("country") || null;
   const fbclid = params.get("fbclid") || null;
   const fbp = leerCookie("_fbp");
+  const utm_source = params.get("utm_source") || null;
+  const utm_medium = params.get("utm_medium") || null;
+  const utm_campaign = params.get("utm_campaign") || null;
+  const utm_content = params.get("utm_content") || null;
+  const utm_term = params.get("utm_term") || null;
+  const gclid = params.get("gclid") || null;
   const resp = await fetch("/web/session", {
     method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({source, country, fbclid, fbp, lang: "en"}),
+    body: JSON.stringify({source, country, fbclid, fbp, lang: "en",
+      utm_source, utm_medium, utm_campaign, utm_content, utm_term, gclid}),
   });
   const data = await resp.json();
   sessionId = data.session_id;
