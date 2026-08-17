@@ -12,6 +12,8 @@ negocio en serio, sobre todo la parte de la LFPDPPP (proteccion de datos en
 Mexico) si el volumen de clientes crece.
 """
 
+from app.config import BRAND_NAME_EN
+
 _BASE_STYLE = """
 <style>
   body { font-family: -apple-system, sans-serif; max-width: 680px; margin: 0 auto;
@@ -99,5 +101,99 @@ escribiéndonos por los canales de contacto indicados en el sitio.</p>
 <h2>6. Menores de edad</h2>
 <p>Este servicio no está dirigido a menores de edad. Si eres menor de edad, pide a un adulto responsable que
 realice la compra.</p>
+</body></html>
+"""
+
+# ---------------------------------------------------------------------------
+# Version en ingles (EE.UU., ago 2026) - servida en /terms y /privacy (ver
+# main.py). NO es una traduccion literal de las de arriba: se quito la
+# seccion de derechos ARCO/LFPDPPP (especifica de la ley mexicana de
+# proteccion de datos, no aplica en EE.UU.) y se reemplazo por una clausula
+# generica de contacto para acceder/corregir/borrar datos, dejando el marco
+# legal especifico (CCPA u otro, segun estado) para cuando un abogado lo
+# revise. Se menciona PayPal como pasarela de pago para EE.UU. (dLocal Go
+# solo aplica a MX/PE/CO).
+#
+# IMPORTANTE: igual que las versiones en espanol, esto sigue siendo un
+# borrador razonable, NO asesoria legal - y las versiones en ingles cargan
+# mas riesgo que una traduccion directa sugeriria (marco de proteccion al
+# consumidor distinto al mexicano). Revisar con un abogado antes de escalar
+# gasto en serio en EE.UU.
+# ---------------------------------------------------------------------------
+TERMS_HTML_EN = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>{BRAND_NAME_EN} — Terms &amp; Conditions</title>{_BASE_STYLE}</head>
+<body>
+<a class="volver" href="/">&larr; Back</a>
+<h1>{BRAND_NAME_EN} — Terms &amp; Conditions</h1>
+<p>Last updated: 2026. By using this site and purchasing a personalized song from {BRAND_NAME_EN}, you agree to the following:</p>
+
+<h2>1. The service</h2>
+<p>{BRAND_NAME_EN} offers personalized songs generated with artificial intelligence (AI), based on the information you
+provide us (who it's for, occasion, musical style, details and anecdotes). The current price is shown before
+you pay.</p>
+
+<h2>2. Process and delivery time</h2>
+<p>After approving the lyrics and confirming payment, the song is generated automatically. Typical generation
+time is a few minutes, but it can vary depending on demand on the music-generation provider's side. Delivery
+happens via a download link that appears on this same page and, as a backup, by email.</p>
+
+<h2>3. Nature of the product</h2>
+<p>Since this is personalized digital content generated specifically for you (not a generic stock product), the
+purchase is considered complete once the audio file is delivered. If the file doesn't arrive or has a real
+technical problem (for example, it fails to generate or the audio is corrupted), contact us to resolve it at no
+extra cost (retry or refund, depending on the case).</p>
+
+<h2>4. Use of the song</h2>
+<p>The song is for personal use (gift, special occasion, etc.). We do not guarantee registered copyright or
+commercial licenses over AI-generated output.</p>
+
+<h2>5. Order content</h2>
+<p>We don't accept orders with defamatory or discriminatory content, content that incites violence, or that
+infringes on third-party rights. We reserve the right to refuse or cancel (with a refund) any order that
+violates this.</p>
+
+<h2>6. Payments</h2>
+<p>Payments are processed through an external payment provider (PayPal for customers in the United States;
+dLocal Go for other regions). We do not store card data on our servers.</p>
+
+<h2>7. Contact</h2>
+<p>For questions, support, or requests related to your order, reach us through the contact channels listed on
+the site.</p>
+</body></html>
+"""
+
+PRIVACY_HTML_EN = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>{BRAND_NAME_EN} — Privacy Notice</title>{_BASE_STYLE}</head>
+<body>
+<a class="volver" href="/">&larr; Back</a>
+<h1>{BRAND_NAME_EN} — Privacy Notice</h1>
+<p>Last updated: 2026.</p>
+
+<h2>1. Data we collect</h2>
+<p>To create and deliver your personalized song, we collect: your email address (to send you the final file),
+the information you share with us about the song (who it's for, occasion, style, details and anecdotes), and
+basic technical data about your visit (like IP address and browser, for security purposes and to measure where
+visits from ads come from).</p>
+
+<h2>2. What we use your data for</h2>
+<p>We use this data solely to: generate the lyrics and style of your song, process payment, deliver the final
+file by email and on this page, and provide support if you have any issue with your order.</p>
+
+<h2>3. Who we share it with</h2>
+<p>We share the strictly necessary information with the providers that make the service possible: the payment
+provider (PayPal or dLocal Go, depending on your region, to process your payment), the AI music-generation
+provider (to create the audio from the lyrics and style), and our email provider (to send you the final file).
+We do not sell or share your data with third parties for advertising purposes.</p>
+
+<h2>4. How long we keep your data</h2>
+<p>We keep your order information for as long as needed to provide support related to that purchase.</p>
+
+<h2>5. Your rights</h2>
+<p>You can request to access, correct, or delete your personal data by contacting us through the contact
+channels listed on the site.</p>
+
+<h2>6. Minors</h2>
+<p>This service is not directed at minors. If you are a minor, please have a responsible adult make the
+purchase.</p>
 </body></html>
 """

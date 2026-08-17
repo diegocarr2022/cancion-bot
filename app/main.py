@@ -24,13 +24,20 @@ from app.config import (
     PENDING_PAYMENT_MAX_HORAS,
     PENDING_PAYMENT_BACKOFF_HORAS,
     PENDING_PAYMENT_BACKOFF_MINUTOS,
+    ENABLE_VIDEO_TIER,
+    BRAND_NAME_EN,
 )
 from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
 from app.email_client import enviar_cancion_por_correo
-from app.landing import LANDING_HTML
-from app.legal import TERMINOS_HTML, PRIVACIDAD_HTML
+from app.landing import LANDING_HTML_ES, LANDING_HTML_EN, pixel_script
+from app.legal import TERMINOS_HTML, PRIVACIDAD_HTML, TERMS_HTML_EN, PRIVACY_HTML_EN
 from app.payment_confirm import confirmar_pago, confirmar_pago_web
+from app.paypal_client import (
+    capture_order as paypal_capture_order,
+    get_order as paypal_get_order,
+    verify_webhook_signature as paypal_verify_webhook_signature,
+)
 from app.suno_client import get_task_status, generate_custom_song, extract_ready_items
 from app.telegram_client import send_document_by_url, send_message, set_webhook, get_me
 from app.web_conversation import handle_web_chat
@@ -116,9 +123,26 @@ async def startup():
     )
 
 
-@app.get("/")
+@app.get("/healthz")
 async def health():
     return {"status": "ok"}
+
+
+# La raiz del dominio ES la landing en ingles directamente (ago 2026: EE.UU.
+# es ahora el mercado principal, ver expansion en la conversacion) - no un
+# redirect ni un JSON de health-check (eso se movio a /healthz, ver
+# healthCheckPath en render.yaml). Root URL limpia (tunecraft.studio a
+# secas) para usar como Final URL en Google Ads: nada mas corto ni mas claro
+# para Quality Score. Default ingles salvo que pidan español explicito
+# (?lang=es) o el navegador lo indique (Accept-Language) - al reves de como
+# era antes, cuando el default era español y EE.UU. la excepcion.
+@app.get("/", response_class=HTMLResponse)
+async def raiz(request: Request, lang: str | None = None):
+    resolved_lang = (lang or "").strip().lower()
+    if resolved_lang not in ("es", "en"):
+        accept_lang = request.headers.get("accept-language", "").lower()
+        resolved_lang = "es" if accept_lang.startswith("es") else "en"
+    return LANDING_HTML_ES if resolved_lang == "es" else LANDING_HTML_EN
 
 
 # ---------------------------------------------------------------------------
@@ -158,8 +182,17 @@ async def ir_a_telegram(source: str, request: Request):
 # instalar ninguna app. Ver app/landing.py y app/web_conversation.py.
 # ---------------------------------------------------------------------------
 @app.get("/cancion", response_class=HTMLResponse)
-async def cancion_landing():
-    return LANDING_HTML
+async def cancion_landing(request: Request, lang: str | None = None):
+    # ?lang=en/es en el link del anuncio decide el idioma - mismo mecanismo
+    # que ?source=/?country= (ver iniciar() en landing.py). Sin el parametro,
+    # se usa el Accept-Language del navegador como respaldo (trafico organico
+    # o directo que no viene de un anuncio con el parametro armado).
+    resolved_lang = (lang or "").strip().lower()
+    if resolved_lang not in ("es", "en"):
+        accept_lang = request.headers.get("accept-language", "").lower()
+        resolved_lang = "en" if accept_lang.startswith("en") else "es"
+    return LANDING_HTML_EN if resolved_lang == "en" else LANDING_HTML_ES
+
 
 
 # Requeridas por las politicas de anuncios de Facebook/Google (cualquier
@@ -174,6 +207,18 @@ async def privacidad():
     return PRIVACIDAD_HTML
 
 
+# Version en ingles, para la landing de EE.UU. (ver LANDING_HTML_EN) - las
+# rutas en espanol de arriba quedan intactas para el trafico de MX/PE/CO.
+@app.get("/terms", response_class=HTMLResponse)
+async def terms():
+    return TERMS_HTML_EN
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy():
+    return PRIVACY_HTML_EN
+
+
 @app.post("/web/session")
 async def web_session(request: Request):
     # Ya no se pide el correo en una pantalla aparte (era un click extra de
@@ -182,21 +227,51 @@ async def web_session(request: Request):
     # (ver web_conversation.py). Aca solo se crea la sesion.
     body = await request.json() if await request.body() else {}
     source = body.get("source")
+
+    # ?lang=en/es en el link del anuncio (ver /cancion arriba y iniciar() en
+    # landing.py) - default espanol si no viene o viene algo invalido.
+    lang = (body.get("lang") or "").strip().lower()
+    if lang not in ("es", "en"):
+        lang = "es"
+
     # ?country=<codigo> en el link del anuncio decide el pais/moneda de este
-    # pedido (ver PAISES_SOPORTADOS en config.py) - si no viene, o viene un
-    # codigo no soportado, cae en Mexico por defecto.
-    precio = get_precio_pais(body.get("country"))
-    country_code = (body.get("country") or "").strip().upper() or "MX"
-    if country_code not in ("MX", "PE", "CO"):
-        country_code = "MX"
+    # pedido (ver PAISES_SOPORTADOS en config.py). Si viene un codigo no
+    # soportado (o no viene), ya NO cae siempre en Mexico: si el idioma es
+    # ingles se asume EE.UU. (dLocal Go/Mercado Pago no pueden cobrar ahi -
+    # ver app/paypal_client.py - por eso EE.UU. no puede caer accidentalmente
+    # en el default de Mexico, quedaria cobrando mal).
+    country_code = (body.get("country") or "").strip().upper()
+    if country_code not in ("MX", "PE", "CO", "US"):
+        country_code = "US" if lang == "en" else "MX"
+
+    # tier: el upsell de video ("song_video") solo existe para EE.UU. y solo
+    # mientras ENABLE_VIDEO_TIER este activo (Fase 2) - cualquier otra
+    # combinacion cae en el tier "song" normal, sin excepciones silenciosas.
+    tier = (body.get("tier") or "song").strip().lower()
+    if country_code != "US" or tier not in ("song", "song_video") or not ENABLE_VIDEO_TIER:
+        tier = "song"
+
+    precio = get_precio_pais(country_code, tier)
+
+    # fbclid/fbp: se leen del lado del navegador (landing.py, del URL y de la
+    # cookie _fbp del propio Pixel de Meta) y se mandan aca para poder
+    # reenviarselos a Meta en el evento Purchase server-side cuando se
+    # confirme el pago (ver app/meta_capi.py) - sin esto Meta no puede
+    # atribuir la venta a la campaña que la genero.
+    fbclid = body.get("fbclid")
+    fbp = body.get("fbp")
+    client_ip = request.client.host if request.client else None
+    client_user_agent = request.headers.get("user-agent")
 
     session_id = uuid.uuid4().hex
     db.create_web_order(
-        session_id, source=source, country=country_code, currency=precio["currency"]
+        session_id, source=source, country=country_code, currency=precio["currency"],
+        fbclid=fbclid, fbp=fbp, client_ip=client_ip, client_user_agent=client_user_agent,
+        language=lang, tier=tier,
     )
     log.info(
-        "[web] nueva sesion %s (source=%s, country=%s, currency=%s)",
-        session_id, source, country_code, precio["currency"],
+        "[web] nueva sesion %s (source=%s, country=%s, currency=%s, lang=%s, tier=%s)",
+        session_id, source, country_code, precio["currency"], lang, tier,
     )
     return {"session_id": session_id}
 
@@ -230,6 +305,15 @@ async def web_status(session_id: str):
         "audio_urls": audio_urls,
         "payment_url": order.get("payment_url"),
         "final_title": order.get("final_title"),
+        # tier/video_status/video_url: usados por el frontend en ingles para
+        # saber si tiene que mostrar el widget de subida de fotos y, mas
+        # adelante, el link de descarga del video (Fase 2 - ver
+        # app/video_client.py). video_status queda en "none" para pedidos
+        # tier="song", asi que la landing en espanol nunca ve estos campos
+        # con un valor distinto al que ya ignora hoy.
+        "tier": order.get("tier", "song"),
+        "video_status": order.get("video_status", "none"),
+        "video_url": order.get("video_url"),
     }
 
 
@@ -248,9 +332,62 @@ async def web_status(session_id: str):
 # directo a su chat (por si cierra esta pestaña o la perdio de algun modo).
 @app.get("/pago-exitoso/web/{session_id}", response_class=HTMLResponse)
 async def pago_exitoso_web(session_id: str):
+    order = db.get_web_order(session_id) or {}
+
+    # PayPal (EE.UU.), a diferencia de dLocal Go, no confirma el pago solo
+    # con llegar aca - "aprobado" todavia no es "cobrado", hace falta
+    # capturar la orden explicitamente. Si el webhook ya la marco pagada
+    # (order["paid"]) no se vuelve a capturar - capture_order() tolera el
+    # error "ORDER_ALREADY_CAPTURED" si de todos modos llegara a pasar.
+    if order.get("gateway") == "paypal" and not order.get("paid"):
+        try:
+            await paypal_capture_order(order["payment_request_id"])
+            await confirmar_pago_web(session_id)
+            order = db.get_web_order(session_id) or order
+        except Exception:
+            log.exception("Error capturando la orden de PayPal para session_id=%s", session_id)
+
+    # Evento "Purchase" del Pixel de Meta (lado del navegador) - se dispara
+    # en cuanto el cliente aterriza aca de vuelta desde la pasarela, que solo
+    # pasa tras un checkout aprobado. Es la unica forma de medir conversion
+    # que tenemos habilitada por ahora (ver pixel_script() en landing.py: la
+    # Conversions API server-side quedo bloqueada por una restriccion vieja
+    # en la cuenta de Meta Business de Diego, sin resolver todavia).
+    pixel_html = pixel_script(
+        "fbq('track', 'Purchase', {value: %s, currency: %s}, {eventID: %s});"
+        % (
+            repr(float(order.get("amount_mxn") or 0)),
+            repr(order.get("currency") or "MXN"),
+            repr(f"web-{session_id}"),
+        ),
+        noscript_ev="Purchase",
+    )
+
+    if order.get("language") == "en":
+        return f"""
+        <html>
+          <head><meta charset="utf-8"><title>{BRAND_NAME_EN} — Payment received</title>{pixel_html}</head>
+          <body style="font-family: sans-serif; text-align: center; padding: 60px 20px;">
+            <p style="font-weight:800; color:#d96b2b; margin-bottom:4px;">{BRAND_NAME_EN}</p>
+            <h1>🎵 Payment received!</h1>
+            <p>You can close this tab and go back to the one where your song was -
+            in a couple minutes you'll see the download link right there.</p>
+            <p style="color:#9a8b73; font-size:14px; margin-top:20px;">
+              Closed that tab by accident? You can come back here:
+            </p>
+            <a href="/?session_id={session_id}"
+               style="display:inline-block; margin-top:8px; padding:14px 28px;
+                      background:linear-gradient(135deg, #e8813a, #d96b2b); color:white;
+                      text-decoration:none; border-radius:8px; font-size:16px; font-weight:bold;">
+              ↩️ Check my song's status
+            </a>
+          </body>
+        </html>
+        """
+
     return f"""
     <html>
-      <head><meta charset="utf-8"><title>Pago recibido</title></head>
+      <head><meta charset="utf-8"><title>Pago recibido</title>{pixel_html}</head>
       <body style="font-family: sans-serif; text-align: center; padding: 60px 20px;">
         <h1>🎵 ¡Pago recibido!</h1>
         <p>Ya puedes cerrar esta pestaña y volver a la otra donde estaba tu canción -
@@ -352,11 +489,19 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
         correo = o.get("email") or "—"
         pais = o.get("country") or "MX"
         monto_txt = f"{monto} {o.get('currency') or ''}".strip() if o.get("amount_mxn") else "—"
+        # Canal: idioma + pasarela + tier, para distinguir de un vistazo los
+        # pedidos EN/PayPal (con precio de lanzamiento, ver config.py) de los
+        # ES/dLocal de siempre - ver expansion a EE.UU. (ago 2026).
+        idioma = (o.get("language") or "es").upper()
+        gateway = o.get("gateway") or "—"
+        tier = o.get("tier") or "song"
+        canal = f"{idioma} · {gateway}" + (" · +video" if tier == "song_video" else "")
         filas_web += f"""
         <tr>
           <td>{nombre}</td>
           <td>{correo}</td>
           <td>{pais}</td>
+          <td style="color:#6b7280; font-size:12.5px;">{canal}</td>
           <td><span style="background:{color}22; color:{color}; padding:3px 10px;
               border-radius:999px; font-size:13px; font-weight:600;">{label}</span></td>
           <td>{monto_txt}</td>
@@ -453,10 +598,10 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
         </p>
         <table style="margin-bottom:32px;">
           <thead>
-            <tr><th>Nombre</th><th>Correo</th><th>País</th><th>Estado</th><th>Monto</th><th>Creado</th></tr>
+            <tr><th>Nombre</th><th>Correo</th><th>País</th><th>Canal</th><th>Estado</th><th>Monto</th><th>Creado</th></tr>
           </thead>
           <tbody>
-            {filas_web or '<tr><td colspan="6" style="text-align:center; color:#9ca3af;">Sin pedidos web todavía</td></tr>'}
+            {filas_web or '<tr><td colspan="7" style="text-align:center; color:#9ca3af;">Sin pedidos web todavía</td></tr>'}
           </tbody>
         </table>
 
@@ -562,6 +707,45 @@ async def dlocal_webhook(request: Request, authorization: str = Header(default="
     web_order = db.find_web_by_payment_request_id(payment_id)
     if web_order and not web_order["paid"]:
         await confirmar_pago_web(web_order["session_id"])
+
+    return {"ok": True}
+
+
+@app.post("/paypal/webhook")
+async def paypal_webhook(request: Request):
+    # PayPal verifica la firma llamando a su propia API (a diferencia del
+    # HMAC local de dLocal Go) - ver paypal_client.verify_webhook_signature.
+    # Le pasamos los headers en minusculas porque asi es como PayPal nombra
+    # los campos que espera de vuelta.
+    headers_lower = {k.lower(): v for k, v in request.headers.items()}
+    raw_body = await request.json()
+
+    try:
+        firma_valida = await paypal_verify_webhook_signature(headers_lower, raw_body)
+    except Exception:
+        log.exception("Error verificando la firma del webhook de PayPal")
+        firma_valida = False
+
+    if not firma_valida:
+        log.warning("Firma invalida en webhook de PayPal")
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    event_type = raw_body.get("event_type")
+    log.info("PayPal webhook event_type=%s", event_type)
+
+    if event_type in ("PAYMENT.CAPTURE.COMPLETED", "CHECKOUT.ORDER.APPROVED"):
+        resource = raw_body.get("resource", {})
+        # custom_id se seteo en create_order() (paypal_client.py) como el
+        # session_id de web_orders - reference_id tambien lo trae por si el
+        # tipo de evento no incluye custom_id directamente en el resource.
+        session_id = resource.get("custom_id") or resource.get("reference_id")
+        if not session_id and resource.get("purchase_units"):
+            session_id = resource["purchase_units"][0].get("custom_id") or resource["purchase_units"][0].get("reference_id")
+
+        if session_id:
+            order = db.get_web_order(session_id)
+            if order and not order["paid"]:
+                await confirmar_pago_web(session_id)
 
     return {"ok": True}
 
@@ -814,7 +998,26 @@ async def check_web_payment_status(order: dict):
     if not _debe_chequear_pago(order):
         return  # todavia no toca (backoff) - se revisa de nuevo mas adelante
 
+    # Camino de respaldo, igual que con dLocal Go - la confirmacion real pasa
+    # por el webhook (y, en el caso de PayPal, tambien por la captura al
+    # volver a /pago-exitoso/web/{session_id}); esto es solo por si ambos
+    # fallaran. Cada gateway tiene su propia forma de consultar el estado -
+    # ver order["gateway"], seteado al crear el pago en web_conversation.py.
     try:
+        if order.get("gateway") == "paypal":
+            paypal_order = await paypal_get_order(order["payment_request_id"])
+            db.touch_last_checked_web(order["session_id"], datetime.utcnow().isoformat())
+            paypal_status = paypal_order.get("status")  # CREATED|APPROVED|COMPLETED|VOIDED
+            if paypal_status == "COMPLETED":
+                await confirmar_pago_web(order["session_id"])
+            elif paypal_status == "VOIDED":
+                db.update_web_order(order["session_id"], step="pago_fallido")
+                log.warning(
+                    "El pago web (PayPal) de session_id=%s quedó en estado %s.",
+                    order["session_id"], paypal_status,
+                )
+            return
+
         payment = await get_payment(order["payment_request_id"])
         db.touch_last_checked_web(order["session_id"], datetime.utcnow().isoformat())
     except Exception:
@@ -892,8 +1095,11 @@ async def check_and_deliver_web(order: dict):
     )
 
     if order.get("email"):
+        language = order.get("language", "es")
+        titulo_default = "Your song" if language == "en" else "Tu canción"
         enviado = await enviar_cancion_por_correo(
-            order["email"], order.get("final_title") or "Tu canción", audio_urls
+            order["email"], order.get("final_title") or titulo_default, audio_urls,
+            language=language,
         )
         if enviado:
             db.update_web_order(order["session_id"], delivered_email=1)

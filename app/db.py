@@ -135,6 +135,36 @@ MIGRATIONS = [
     # ya se abandono. Ver PENDING_PAYMENT_BACKOFF_* en config.py.
     "ALTER TABLE orders ADD COLUMN last_checked_at TEXT",
     "ALTER TABLE web_orders ADD COLUMN last_checked_at TEXT",
+    # Datos para mandar el evento "Purchase" a la Conversions API de Meta al
+    # confirmarse el pago (ver app/meta_capi.py) - sin esto, Meta no puede
+    # medir el costo de adquisicion real ni optimizar la entrega de los
+    # anuncios hacia gente que efectivamente compra. fbclid/fbp se capturan
+    # en el navegador (landing.py) al crear la sesion; ip/user_agent se leen
+    # del propio request en /web/session (main.py).
+    "ALTER TABLE web_orders ADD COLUMN fbclid TEXT",
+    "ALTER TABLE web_orders ADD COLUMN fbp TEXT",
+    "ALTER TABLE web_orders ADD COLUMN client_ip TEXT",
+    "ALTER TABLE web_orders ADD COLUMN client_user_agent TEXT",
+    # Expansion a EE.UU. (ago 2026): idioma de la sesion (?lang= en la URL del
+    # anuncio o Accept-Language del navegador - ver /cancion en main.py) y el
+    # tier elegido ("song" o "song_video", este ultimo solo para US mientras
+    # ENABLE_VIDEO_TIER este activo). gateway indica que pasarela genero el
+    # payment_request_id de este pedido ("dlocal" o "paypal") - necesario
+    # porque cada una tiene su propia forma de consultar el estado real de un
+    # pago (ver check_web_payment_status en main.py).
+    "ALTER TABLE web_orders ADD COLUMN language TEXT NOT NULL DEFAULT 'es'",
+    "ALTER TABLE web_orders ADD COLUMN tier TEXT NOT NULL DEFAULT 'song'",
+    "ALTER TABLE web_orders ADD COLUMN gateway TEXT",
+    # Columnas del upsell de video (Fase 2) - se agregan ya de una para no
+    # tener que migrar dos veces, aunque no se usen hasta que ENABLE_VIDEO_TIER
+    # este activo. video_status es independiente de "step": un fallo de video
+    # NUNCA debe bloquear ni demorar la entrega de la cancion.
+    "ALTER TABLE web_orders ADD COLUMN audio_duration REAL",
+    "ALTER TABLE web_orders ADD COLUMN photos_json TEXT",
+    "ALTER TABLE web_orders ADD COLUMN video_status TEXT NOT NULL DEFAULT 'none'",
+    "ALTER TABLE web_orders ADD COLUMN video_path TEXT",
+    "ALTER TABLE web_orders ADD COLUMN video_url TEXT",
+    "ALTER TABLE web_orders ADD COLUMN video_error TEXT",
 ]
 
 
@@ -467,16 +497,25 @@ def create_web_order(
     source: str | None = None,
     country: str = "MX",
     currency: str = "MXN",
+    fbclid: str | None = None,
+    fbp: str | None = None,
+    client_ip: str | None = None,
+    client_user_agent: str | None = None,
+    language: str = "es",
+    tier: str = "song",
 ):
     now = datetime.utcnow().isoformat()
     with get_conn() as conn:
         conn.execute(
             """
             INSERT INTO web_orders
-                (session_id, email, step, messages, source, country, currency, created_at, updated_at)
-            VALUES (?, ?, 'charlando', '[]', ?, ?, ?, ?, ?)
+                (session_id, email, step, messages, source, country, currency,
+                 fbclid, fbp, client_ip, client_user_agent, language, tier,
+                 created_at, updated_at)
+            VALUES (?, ?, 'charlando', '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (session_id, email, source, country, currency, now, now),
+            (session_id, email, source, country, currency,
+             fbclid, fbp, client_ip, client_user_agent, language, tier, now, now),
         )
 
 
@@ -517,6 +556,20 @@ def find_unfinished_web_suno_tasks():
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT * FROM web_orders WHERE paid = 1 AND suno_task_id IS NOT NULL AND delivered = 0"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def find_stuck_web_video(older_than_seconds: int = 1200):
+    """Pedidos de tier 'song_video' que quedaron a mitad de un render (proceso
+    reiniciado por un deploy) - mismo patron que find_stuck_generation(). El
+    umbral (1200s = 20 min) tiene que ser mayor al tiempo maximo que puede
+    tardar un render normal (unos pocos minutos para 3-5 fotos)."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM web_orders WHERE video_status = 'renderizando' "
+            "AND (julianday('now') - julianday(updated_at)) * 86400 > ?",
+            (older_than_seconds,),
         ).fetchall()
         return [dict(r) for r in rows]
 

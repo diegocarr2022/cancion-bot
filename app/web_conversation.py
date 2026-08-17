@@ -14,9 +14,15 @@ import logging
 import time
 
 from app import db
-from app.claude_client import send_chat, build_web_content_system_prompt, WEB_CONTENT_TOOLS
+from app.claude_client import (
+    send_chat,
+    build_web_content_system_prompt,
+    WEB_CONTENT_TOOLS,
+    WEB_CONTENT_TOOLS_EN,
+)
 from app.config import BASE_URL, get_precio_pais
 from app.dlocal_client import create_payment
+from app.paypal_client import create_order as create_paypal_order
 
 log = logging.getLogger("cancion-bot")
 
@@ -27,6 +33,13 @@ KICKOFF_TEXT = (
     "nada. Saludalo con calidez y en ESE MISMO primer mensaje pregúntale su "
     "nombre - nada mas por ahora, no le sumes las preguntas de la cancion "
     "todavia, esas van en tu siguiente mensaje una vez que te diga como se llama.)"
+)
+
+KICKOFF_TEXT_EN = (
+    "(This is the start of a new session - the customer hasn't written "
+    "anything yet. Greet them warmly and in that SAME first message ask "
+    "for their name - nothing else for now, don't add the song questions "
+    "yet, those go in your next message once they tell you their name.)"
 )
 
 
@@ -42,7 +55,8 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
     if not order:
         raise ValueError(f"No existe una sesion web con id {session_id}")
 
-    precio = get_precio_pais(order.get("country"))
+    precio = get_precio_pais(order.get("country"), order.get("tier", "song"))
+    language = order.get("language", "es")
 
     if order["step"] != "charlando":
         # Ya paso de la etapa de charla (esta esperando pago, generando, o
@@ -86,23 +100,47 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
             )
 
         order_id = f"web-{session_id}-{int(time.time())}"
+        # EE.UU. paga via PayPal (dLocal Go no puede cobrarle a alguien
+        # fisicamente en EE.UU. - ver app/paypal_client.py); el resto de
+        # paises sigue con dLocal Go, sin cambios. Ambas ramas dejan
+        # `payment` con el mismo shape {"redirect_url", "id"}.
+        es_estados_unidos = (order.get("country") or "MX") == "US"
+        descripcion = "Personalized song" if es_estados_unidos else "Canción personalizada"
+        if order.get("tier") == "song_video":
+            descripcion += " + video"
+
         try:
-            payment = await create_payment(
-                amount=precio["amount"],
-                currency=precio["currency"],
-                country=(order.get("country") or "MX"),
-                order_id=order_id,
-                description="Canción personalizada",
-                notification_url=f"{BASE_URL}/dlocal/webhook",
-                # session_id va en el PATH, no en query string: algunos
-                # gateways de pago (dLocal Go incluido) no garantizan que
-                # preserven query params custom al armar la redireccion final
-                # - un segmento de path es mucho mas dificil de perder o
-                # pisar que un "?param=valor".
-                success_url=f"{BASE_URL}/pago-exitoso/web/{session_id}",
-            )
+            if es_estados_unidos:
+                payment = await create_paypal_order(
+                    amount=precio["amount"],
+                    currency=precio["currency"],
+                    order_id=order_id,
+                    description=descripcion,
+                    return_url=f"{BASE_URL}/pago-exitoso/web/{session_id}",
+                    cancel_url=f"{BASE_URL}/?session_id={session_id}",
+                )
+                gateway = "paypal"
+            else:
+                payment = await create_payment(
+                    amount=precio["amount"],
+                    currency=precio["currency"],
+                    country=(order.get("country") or "MX"),
+                    order_id=order_id,
+                    description=descripcion,
+                    notification_url=f"{BASE_URL}/dlocal/webhook",
+                    # session_id va en el PATH, no en query string: algunos
+                    # gateways de pago (dLocal Go incluido) no garantizan que
+                    # preserven query params custom al armar la redireccion final
+                    # - un segmento de path es mucho mas dificil de perder o
+                    # pisar que un "?param=valor".
+                    success_url=f"{BASE_URL}/pago-exitoso/web/{session_id}",
+                )
+                gateway = "dlocal"
         except Exception:
-            log.exception("Error creando el pago web en dLocal Go para session_id=%s", session_id)
+            log.exception(
+                "Error creando el pago web (%s) para session_id=%s",
+                "PayPal" if es_estados_unidos else "dLocal Go", session_id,
+            )
             return (
                 "Hubo un problema tecnico generando el link de pago. Decile al cliente "
                 "que ya lo estamos revisando y que intente de nuevo en un momento."
@@ -114,6 +152,7 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
             payment_url=payment["redirect_url"],
             payment_request_id=payment["id"],
             amount_mxn=precio["amount"],
+            gateway=gateway,
         )
         resultado["listo_para_pagar"] = True
         resultado["payment_url"] = payment["redirect_url"]
@@ -127,15 +166,16 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
     if not messages:
         # primer turno de esta sesion: arrancamos con el saludo/kickoff en
         # vez de esperar a que el cliente escriba primero.
-        messages.append({"role": "user", "content": KICKOFF_TEXT})
+        messages.append({"role": "user", "content": KICKOFF_TEXT_EN if language == "en" else KICKOFF_TEXT})
     else:
         messages.append({"role": "user", "content": text})
 
-    system_prompt = build_web_content_system_prompt(precio["texto"])
+    system_prompt = build_web_content_system_prompt(precio["texto"], language=language)
+    tools = WEB_CONTENT_TOOLS_EN if language == "en" else WEB_CONTENT_TOOLS
 
     for _ in range(MAX_TOOL_ROUNDS):
         try:
-            response = await send_chat(messages, system=system_prompt, tools=WEB_CONTENT_TOOLS)
+            response = await send_chat(messages, system=system_prompt, tools=tools)
         except Exception:
             log.exception("Error hablando con Claude para session_id=%s", session_id)
             resultado["mensajes"].append("Tuve un problema procesando tu mensaje, ¿me lo puedes repetir?")

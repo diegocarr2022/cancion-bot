@@ -5,6 +5,10 @@ services:
     plan: starter
     buildCommand: "pip install -r requirements.txt"
     startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    # "/" ahora redirige a la landing (/cancion) en vez de servir el
+    # health-check - el check de salud de Render se movio aca para no
+    # depender de que la raiz siga devolviendo 200 en vez de un redirect.
+    healthCheckPath: /healthz
     disk:
       name: cancion-bot-data
       mountPath: /data
@@ -44,3 +48,37 @@ services:
         value: "60"
       - key: POLL_INTERVAL_STUCK_SECONDS
         value: "90"
+      - key: PENDING_PAYMENT_MAX_HORAS
+        value: "48"
+      - key: META_PIXEL_ID
+        sync: false
+      - key: META_CAPI_ACCESS_TOKEN
+        sync: false
+      - key: META_CAPI_TEST_EVENT_CODE
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: PAYPAL_ENV
+        value: "sandbox"
+      - key: PRECIO_USD_SONG
+        value: "27"
+      - key: PRECIO_TEXTO_USD_SONG
+        value: "$27 USD"
+      - key: PRECIO_USD_VIDEO
+        value: "49"
+      - key: PRECIO_TEXTO_USD_VIDEO
+        value: "$49 USD"
+      - key: LAUNCH_PRICE_ENDS_AT
+        value: "2026-08-30T23:59:59+00:00"
+      - key: PRECIO_USD_SONG_REGULAR
+        value: "39.90"
+      - key: PRECIO_TEXTO_USD_SONG_REGULAR
+        value: "$39.90 USD"
+      - key: ENABLE_VIDEO_TIER
+        value: "false"
+      - key: MEDIA_DIR
+        value: "/data/media"

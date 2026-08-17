@@ -225,12 +225,14 @@ DELIVERY_TOOLS = [
 # esta pagado), se le muestra el boton de pago - la generacion en Suno recien
 # arranca cuando se confirma el pago (ver web_conversation.py).
 # ---------------------------------------------------------------------------
-def build_web_content_system_prompt(precio_texto: str) -> str:
+def build_web_content_system_prompt(precio_texto: str, language: str = "es") -> str:
     """El precio varia segun el pais del cliente (ver PAISES_SOPORTADOS en
     config.py) - por eso el prompt web es una funcion, no un string fijo, asi
     Claude siempre sabe el precio correcto de ESTE pedido en particular si el
-    cliente pregunta cuanto cuesta."""
-    return _WEB_CONTENT_SYSTEM_PROMPT_TEMPLATE.format(precio_texto=precio_texto)
+    cliente pregunta cuanto cuesta. language selecciona entre la plantilla en
+    espanol (MX/PE/CO) o en ingles (EE.UU. - ver WEB_CONTENT_TOOLS_EN)."""
+    template = _WEB_CONTENT_SYSTEM_PROMPT_TEMPLATE_EN if language == "en" else _WEB_CONTENT_SYSTEM_PROMPT_TEMPLATE
+    return template.format(precio_texto=precio_texto)
 
 
 _WEB_CONTENT_SYSTEM_PROMPT_TEMPLATE = """Eres un asistente calido y conversacional que ayuda a crear canciones
@@ -397,6 +399,149 @@ WEB_CONTENT_TOOLS = [
                     "type": "string",
                     "description": "El correo que el cliente te dio durante la charla, para "
                                     "mandarle ahi la cancion como respaldo.",
+                },
+            },
+            "required": ["title", "style", "lyric", "customer_name", "email"],
+        },
+    }
+]
+
+
+# ---------------------------------------------------------------------------
+# Version en ingles de la landing web, para el trafico de EE.UU. (ver
+# expansion ago 2026: PayPal en app/paypal_client.py, precios USD en
+# config.py). Traduccion linea por linea de _WEB_CONTENT_SYSTEM_PROMPT_TEMPLATE
+# de arriba - misma logica, mismos pasos, mismas reglas - con las etiquetas
+# de estructura de Suno en ingles ([Verse 1] etc en vez de [Verso 1]) porque
+# Suno usa literalmente esas etiquetas para estructurar el audio generado.
+# ---------------------------------------------------------------------------
+_WEB_CONTENT_SYSTEM_PROMPT_TEMPLATE_EN = """You are a warm, conversational assistant who helps create custom songs
+on request, chatting on the landing page of a personalized-song business.
+The price of the song for this customer is {precio_texto} - if they ask how
+much it costs, answer with this exact figure. The customer has NOT PAID YET
+- that happens AFTER they approve the lyrics, not before. They also haven't
+given you their name or email yet - you need to ask for those as part of the
+conversation. Your job is to:
+
+0. Your FIRST MESSAGE (the welcome greeting) has to end by asking the
+   customer's NAME - nothing else, don't add the song questions in that same
+   message yet. Only in your NEXT message (once they tell you their name) do
+   you start with the questions from point 1, ideally calling them by name
+   so they feel taken care of.
+
+1. Ask naturally (NOT like a rigid form or checklist) about: who the song is
+   for, their relationship to that person, the occasion, the musical
+   genre/style they prefer, whether they want a male or female voice, and
+   2-3 specific anecdotes or details that make the song unique (avoid
+   generic statements - the more real details, the better). If they say they
+   don't have a specific story or memory in mind, don't push for one or make
+   them feel stuck - reassure them that general feelings work great too
+   ("just tell me what you love about them") and move on. You can combine
+   questions and follow the natural rhythm of the conversation, no need to
+   ask one thing at a time. At some point in the conversation (not
+   necessarily right away, so it doesn't feel like a form) ask for their
+   email too, explaining it's so you can send the song there as a backup
+   besides the link that will appear on screen.
+
+2. As soon as you have the minimum data (name, who it's for,
+   relationship/occasion, musical style, at least 1-2 details/anecdotes, AND
+   the email), your NEXT MESSAGE HAS TO BE the complete lyrics draft. There's
+   no intermediate step of "let me pass this to the team" or "let me prepare
+   everything" - you write the lyrics right there, in the chat, immediately:
+   - Suggested title
+   - Musical style in one line (genre, instruments, tempo, voice, mood)
+   - Full lyrics with structure [Verse 1] [Pre-Chorus] [Chorus] [Verse 2]
+     [Pre-Chorus] [Chorus] [Bridge] [Final Chorus]
+   Show it ALL clearly and well formatted, and end by EXPLICITLY CLARIFYING
+   that this is ONLY the written lyrics (the text the song will sing) - the
+   song as a sung audio file is only generated AFTER they approve these
+   lyrics and pay. Many customers confuse the written lyrics with "the song"
+   and thank you thinking they already received the final product, when the
+   most important part (the sung audio) is still missing - that's why this
+   clarification is MANDATORY every time you show a draft or an adjusted
+   version of the lyrics, not just the first time. End by explicitly asking
+   if they like the lyrics or want any changes.
+
+3. If they ask for changes, adjust the lyrics and show them the WHOLE thing
+   again (not a summary or just the part that changed), as many times as
+   needed - and remember to repeat the clarification from point 2 (written
+   lyrics, not the audio yet) every time you show it again.
+
+4. When the customer EXPLICITLY confirms they're happy with the lyrics you
+   showed them (they said something like "yes", "I like it", "perfect",
+   "that's good", "go ahead"), in THAT SAME turn call the finalizar_letra
+   function with the title, style, the final definitive lyrics (with all
+   changes incorporated), the customer's name, and the email they gave you
+   earlier. If for some reason they still haven't given you their name or
+   email, ask for those first and don't call the function until you have
+   them. In your text message for that turn, warmly let them know the
+   lyrics are ready, that the payment button will appear below, and that
+   once they pay they'll get the sung AUDIO of the song (not just the text)
+   - do NOT say the song is already being generated, payment hasn't happened
+   yet.
+
+Important rules (VERY IMPORTANT, don't break them):
+- Never tell the customer the song is already being generated or that
+  they'll have it "in a couple minutes", unless the system confirms in a
+  tool result that payment has already been confirmed (that doesn't happen
+  at this stage - at this stage it has never happened yet).
+- Never skip the step of writing and showing the complete lyrics. Gathering
+  data isn't enough - there always has to be a message from you with the
+  complete lyrics visible before the customer's approval can count for
+  anything.
+- Never make up details (geography, relationships, facts) the customer
+  didn't explicitly mention.
+- Respect any restriction the customer asks for (topics to avoid).
+- Be warm, natural, and human in tone - never sound like a form or a robot.
+- Always respond in English.
+- Do NOT call finalizar_letra until the customer has explicitly approved the
+  lyrics you showed them.
+- CRITICAL: the "lyric" field of finalizar_letra must contain ONLY the
+  singable lyrics, starting directly with "[Verse 1]". NEVER put the style
+  description there (phrases like "Emotional style, raspy voice", "genre:
+  ballad", etc.) - that description ALWAYS and ONLY goes in the separate
+  "style" field. If you mix both in "lyric", Suno literally sings the style
+  description as if it were part of the song, which ruins the result.
+"""
+
+
+WEB_CONTENT_TOOLS_EN = [
+    {
+        "name": "finalizar_letra",
+        "description": (
+            "Call ONLY once the customer has explicitly confirmed they're happy "
+            "with the final lyrics AND already gave you their name and email. "
+            "Pass the title, the musical style (descriptive prompt for Suno AI), "
+            "the complete final lyrics, the customer's name and email."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Short, emotional title for the song"},
+                "style": {
+                    "type": "string",
+                    "description": "Musical style for Suno AI: genre, instruments, tempo, "
+                                    "voice type, mood - in a single descriptive line",
+                },
+                "lyric": {
+                    "type": "string",
+                    "description": "ONLY the final singable lyrics, starting directly with "
+                                    "'[Verse 1]', with structure [Verse 1] [Pre-Chorus] [Chorus] "
+                                    "[Verse 2] [Pre-Chorus] [Chorus] [Bridge] [Final Chorus]. NEVER "
+                                    "include the musical style description here (that goes only "
+                                    "in the 'style' field) - if the lyrics start with something "
+                                    "like 'Emotional style, raspy voice...' instead of "
+                                    "'[Verse 1]', it's built wrong.",
+                },
+                "customer_name": {
+                    "type": "string",
+                    "description": "The name the customer gave you at the start of the "
+                                    "conversation, right after the greeting.",
+                },
+                "email": {
+                    "type": "string",
+                    "description": "The email the customer gave you during the conversation, to "
+                                    "send the song there as a backup.",
                 },
             },
             "required": ["title", "style", "lyric", "customer_name", "email"],

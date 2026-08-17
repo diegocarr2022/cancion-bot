@@ -17,7 +17,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-from app.config import GMAIL_USER, GMAIL_APP_PASSWORD
+from app.config import GMAIL_USER, GMAIL_APP_PASSWORD, BRAND_NAME_EN
 
 log = logging.getLogger("cancion-bot")
 
@@ -37,9 +37,12 @@ def _enviar_sync(destinatario: str, asunto: str, cuerpo_html: str):
         server.sendmail(GMAIL_USER, [destinatario], msg.as_string())
 
 
-async def enviar_cancion_por_correo(destinatario: str, titulo: str, audio_urls: list[str]) -> bool:
+async def enviar_cancion_por_correo(
+    destinatario: str, titulo: str, audio_urls: list[str], language: str = "es"
+) -> bool:
     """Devuelve True si se mando (o si no hay credenciales configuradas, para
-    no bloquear el flujo), False si hubo un error real intentando mandarlo."""
+    no bloquear el flujo), False si hubo un error real intentando mandarlo.
+    language: "es" (MX/PE/CO) o "en" (EE.UU. - ver expansion ago 2026)."""
     if not GMAIL_USER or not GMAIL_APP_PASSWORD:
         log.warning(
             "GMAIL_USER/GMAIL_APP_PASSWORD no configurados - se omite el correo de "
@@ -48,25 +51,77 @@ async def enviar_cancion_por_correo(destinatario: str, titulo: str, audio_urls: 
         )
         return False
 
-    enlaces_html = "".join(
-        f'<p><a href="{url}" style="color:#c2410c; font-weight:bold;">'
-        f"Descargar {('versión ' + str(i + 1)) if len(audio_urls) > 1 else 'canción'}</a></p>"
-        for i, url in enumerate(audio_urls)
-    )
-    cuerpo_html = f"""
-    <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-      <h2>🎵 ¡Tu canción "{titulo}" está lista!</h2>
-      <p>Aquí tienes el link (o links, si generamos más de una versión) para descargarla:</p>
-      {enlaces_html}
-      <p style="color:#6b7280; font-size:13px;">Gracias por confiar en nosotros para este regalo.</p>
-    </div>
-    """
+    if language == "en":
+        enlaces_html = "".join(
+            f'<p><a href="{url}" style="color:#c2410c; font-weight:bold;">'
+            f"Download {('version ' + str(i + 1)) if len(audio_urls) > 1 else 'my song'}</a></p>"
+            for i, url in enumerate(audio_urls)
+        )
+        cuerpo_html = f"""
+        <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+          <h2>🎵 Your song "{titulo}" is ready!</h2>
+          <p>Here's the link (or links, if we generated more than one version) to download it:</p>
+          {enlaces_html}
+          <p style="color:#6b7280; font-size:13px;">Thank you for trusting {BRAND_NAME_EN} with this gift.</p>
+        </div>
+        """
+        asunto = f"🎵 {BRAND_NAME_EN}: your song \"{titulo}\" is ready"
+    else:
+        enlaces_html = "".join(
+            f'<p><a href="{url}" style="color:#c2410c; font-weight:bold;">'
+            f"Descargar {('versión ' + str(i + 1)) if len(audio_urls) > 1 else 'canción'}</a></p>"
+            for i, url in enumerate(audio_urls)
+        )
+        cuerpo_html = f"""
+        <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+          <h2>🎵 ¡Tu canción "{titulo}" está lista!</h2>
+          <p>Aquí tienes el link (o links, si generamos más de una versión) para descargarla:</p>
+          {enlaces_html}
+          <p style="color:#6b7280; font-size:13px;">Gracias por confiar en nosotros para este regalo.</p>
+        </div>
+        """
+        asunto = f"🎵 Tu canción personalizada: {titulo}"
 
     try:
-        await asyncio.to_thread(
-            _enviar_sync, destinatario, f"🎵 Tu canción personalizada: {titulo}", cuerpo_html
-        )
+        await asyncio.to_thread(_enviar_sync, destinatario, asunto, cuerpo_html)
         return True
     except Exception:
         log.exception("Error mandando el correo de entrega a %s", destinatario)
+        return False
+
+
+async def enviar_video_por_correo(destinatario: str, titulo: str, video_url: str, language: str = "es") -> bool:
+    """Fase 2 (upsell de video, ver app/video_client.py): correo separado del
+    de la cancion porque el video puede terminar bastante despues (el render
+    arranca recien cuando el cliente sube las fotos, que puede ser minutos u
+    horas despues de que ya se mando el correo del audio)."""
+    if not GMAIL_USER or not GMAIL_APP_PASSWORD:
+        log.warning(
+            "GMAIL_USER/GMAIL_APP_PASSWORD no configurados - se omite el correo de "
+            "video para %s.", destinatario,
+        )
+        return False
+
+    if language == "en":
+        cuerpo_html = f"""
+        <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+          <h2>🎬 Your video for "{titulo}" is ready!</h2>
+          <p><a href="{video_url}" style="color:#c2410c; font-weight:bold;">Download my video</a></p>
+        </div>
+        """
+        asunto = f"🎬 {BRAND_NAME_EN}: your video for \"{titulo}\" is ready"
+    else:
+        cuerpo_html = f"""
+        <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+          <h2>🎬 ¡Tu video de "{titulo}" está listo!</h2>
+          <p><a href="{video_url}" style="color:#c2410c; font-weight:bold;">Descargar mi video</a></p>
+        </div>
+        """
+        asunto = f"🎬 Tu video ya está listo: {titulo}"
+
+    try:
+        await asyncio.to_thread(_enviar_sync, destinatario, asunto, cuerpo_html)
+        return True
+    except Exception:
+        log.exception("Error mandando el correo de video a %s", destinatario)
         return False
