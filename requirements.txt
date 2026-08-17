@@ -8,3 +8,7 @@ python-dotenv==1.0.1
 # aunque el endpoint todavia no exista, para no tener que tocar requirements
 # de nuevo en la Fase 2.
 python-multipart==0.0.9
+# reportlab: genera al vuelo el PDF descargable/imprimible de la letra
+# aprobada (ver app/pdf_client.py) - pura Python, sin dependencias nativas
+# externas, para no depender de que Render tenga instalado wkhtmltopdf/etc.
+reportlab==4.2.5

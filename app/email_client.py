@@ -38,7 +38,8 @@ def _enviar_sync(destinatario: str, asunto: str, cuerpo_html: str):
 
 
 async def enviar_cancion_por_correo(
-    destinatario: str, titulo: str, audio_urls: list[str], language: str = "es"
+    destinatario: str, titulo: str, audio_urls: list[str], language: str = "es",
+    lyrics_pdf_url: str | None = None,
 ) -> bool:
     """Devuelve True si se mando (o si no hay credenciales configuradas, para
     no bloquear el flujo), False si hubo un error real intentando mandarlo.
@@ -57,6 +58,11 @@ async def enviar_cancion_por_correo(
             f"Download {('version ' + str(i + 1)) if len(audio_urls) > 1 else 'my song'}</a></p>"
             for i, url in enumerate(audio_urls)
         )
+        if lyrics_pdf_url:
+            enlaces_html += (
+                f'<p><a href="{lyrics_pdf_url}" style="color:#c2410c; font-weight:bold;">'
+                f"Download the lyrics (PDF)</a></p>"
+            )
         cuerpo_html = f"""
         <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
           <h2>🎵 Your song "{titulo}" is ready!</h2>

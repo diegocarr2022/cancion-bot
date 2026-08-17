@@ -867,9 +867,9 @@ ___META_PIXEL_SCRIPT___
 
     <div class="player" id="pago-box">
       <p style="margin-top:0;">✅ Your lyrics are ready! Once you pay, we start recording.</p>
-      <a id="link-pago" href="#" target="_blank" rel="noopener">Pay $27 &amp; Create My Song</a>
+      <a id="link-pago" href="#">Pay $27 &amp; Create My Song</a>
       <p style="font-size:12px; color:var(--paper-ink-soft); margin-top:14px; margin-bottom:0;">
-        Opens in a new tab — don't close this one, your song will land right here.
+        You'll come right back here once payment goes through.
       </p>
     </div>
 
@@ -1049,6 +1049,12 @@ function mostrarDescarga(audioUrls) {
     cont.appendChild(a);
     cont.appendChild(document.createElement("br"));
   });
+  const pdf = document.createElement("a");
+  pdf.href = "/web/lyrics-pdf/" + encodeURIComponent(sessionId);
+  pdf.target = "_blank"; pdf.rel = "noopener";
+  pdf.textContent = "Download lyrics (PDF)";
+  cont.appendChild(pdf);
+  cont.appendChild(document.createElement("br"));
   $("descarga-box").style.display = "block";
 }
 

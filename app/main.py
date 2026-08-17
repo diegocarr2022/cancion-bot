@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 import resource
 import secrets
@@ -8,7 +9,7 @@ import re
 from datetime import datetime
 
 from fastapi import FastAPI, Request, Header, HTTPException, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 
@@ -33,6 +34,7 @@ from app.email_client import enviar_cancion_por_correo
 from app.landing import LANDING_HTML_ES, LANDING_HTML_EN, pixel_script
 from app.legal import TERMINOS_HTML, PRIVACIDAD_HTML, TERMS_HTML_EN, PRIVACY_HTML_EN
 from app.payment_confirm import confirmar_pago, confirmar_pago_web
+from app.pdf_client import build_lyrics_pdf
 from app.paypal_client import (
     capture_order as paypal_capture_order,
     get_order as paypal_get_order,
@@ -314,19 +316,43 @@ async def web_status(session_id: str):
     }
 
 
+@app.get("/web/lyrics-pdf/{session_id}")
+async def web_lyrics_pdf(session_id: str):
+    """Genera al vuelo el PDF de la letra aprobada (ver app/pdf_client.py) -
+    se ofrece junto al link de audio en cuanto la cancion queda entregada."""
+    order = db.get_web_order(session_id)
+    if not order or not order.get("final_lyric"):
+        raise HTTPException(status_code=404, detail="No hay letra todavia para esta sesion")
+    pdf_bytes = build_lyrics_pdf(
+        order.get("final_title") or "Your song",
+        order.get("final_style") or "",
+        order["final_lyric"],
+    )
+    slug = re.sub(r"[^a-z0-9]+", "-", (order.get("final_title") or "tunecraft-song").lower()).strip("-") or "tunecraft-song"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{slug}-lyrics.pdf"'},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Pagina a la que dLocal Go redirige al cliente en su navegador despues de
 # pagar (success_url). No hace falta que haga nada - la confirmacion real
 # del pago llega por webhook/polling - es solo para que el cliente no vea un
 # JSON crudo y sepa que puede volver a Telegram.
 # ---------------------------------------------------------------------------
-# Version web: el link de pago abre en una pestaña NUEVA para que la
-# pestaña original con el chat siga viva haciendo polling a /web/status. El
-# session_id va en el PATH (no en query string) porque no todos los gateways
-# de pago preservan query params custom al armar la redireccion final - un
-# segmento de path es mucho mas dificil de perder. Con el session_id en la
-# URL, ademas, podemos reconocer al cliente y darle un link de regreso
-# directo a su chat (por si cierra esta pestaña o la perdio de algun modo).
+# Version web (ES/dLocal): el link de pago abre en una pestaña NUEVA para que
+# la pestaña original con el chat siga viva haciendo polling a /web/status.
+# (La version EN/PayPal ya NO abre pestaña nueva - ver el boton de pago en
+# LANDING_HTML_EN y el manejo de esta misma ruta mas abajo, que redirige de
+# vuelta al chat en la misma pestaña para no perder continuidad.)
+# El session_id va en el PATH (no en query string) porque no todos los
+# gateways de pago preservan query params custom al armar la redireccion
+# final - un segmento de path es mucho mas dificil de perder. Con el
+# session_id en la URL, ademas, podemos reconocer al cliente y darle un link
+# de regreso directo a su chat (por si cierra esta pestaña o la perdio de
+# algun modo).
 @app.get("/pago-exitoso/web/{session_id}", response_class=HTMLResponse)
 async def pago_exitoso_web(session_id: str):
     order = db.get_web_order(session_id) or {}
@@ -361,24 +387,24 @@ async def pago_exitoso_web(session_id: str):
     )
 
     if order.get("language") == "en":
+        # Este pago ocurre en la misma pestana (el boton de pago ya no abre
+        # target=_blank) - en vez de dejar al cliente en una pagina estatica
+        # separada de "pago recibido" pidiendole que vuelva el solo a la otra
+        # pestana, disparamos el pixel de conversion y lo regresamos de una
+        # directo al chat/estado de su cancion (retomarSesion() en el JS de
+        # la raiz ya sabe leer ?session_id= y mostrar el estado correcto).
         return f"""
         <html>
           <head><meta charset="utf-8"><title>{BRAND_NAME_EN} — Payment received</title>{pixel_html}</head>
           <body style="font-family: sans-serif; text-align: center; padding: 60px 20px;">
             <p style="font-weight:800; color:#d96b2b; margin-bottom:4px;">{BRAND_NAME_EN}</p>
             <h1>🎵 Payment received!</h1>
-            <p>You can close this tab and go back to the one where your song was -
-            in a couple minutes you'll see the download link right there.</p>
-            <p style="color:#9a8b73; font-size:14px; margin-top:20px;">
-              Closed that tab by accident? You can come back here:
-            </p>
-            <a href="/?session_id={session_id}"
-               style="display:inline-block; margin-top:8px; padding:14px 28px;
-                      background:linear-gradient(135deg, #e8813a, #d96b2b); color:white;
-                      text-decoration:none; border-radius:8px; font-size:16px; font-weight:bold;">
-              ↩️ Check my song's status
-            </a>
+            <p>Taking you back to your song…</p>
+            <a href="/?session_id={session_id}" id="volver">Continue</a>
           </body>
+          <script>
+            setTimeout(function() {{ window.location.replace("/?session_id={session_id}"); }}, 600);
+          </script>
         </html>
         """
 
@@ -464,6 +490,73 @@ _ESTADO_LABELS = {
 }
 
 
+def _extraer_texto_contenido(content) -> str:
+    """Convierte el campo 'content' de un mensaje (formato API de Anthropic -
+    string simple, o lista de bloques text/tool_use/tool_result) en texto
+    legible para mostrar en el panel de admin, escapado para HTML."""
+    if isinstance(content, str):
+        return html.escape(content)
+    if not isinstance(content, list):
+        return ""
+    fragmentos = []
+    for bloque in content:
+        if not isinstance(bloque, dict):
+            continue
+        tipo = bloque.get("type")
+        if tipo == "text":
+            texto = html.escape(bloque.get("text", "")).strip()
+            if texto:
+                fragmentos.append(texto)
+        elif tipo == "tool_use":
+            fragmentos.append(f"<em style='color:#9ca3af;'>→ usó herramienta: {html.escape(bloque.get('name', ''))}</em>")
+        elif tipo == "tool_result":
+            sub = bloque.get("content")
+            if isinstance(sub, list):
+                sub_texto = " ".join(
+                    html.escape(b.get("text", "")) for b in sub if isinstance(b, dict) and b.get("type") == "text"
+                )
+            else:
+                sub_texto = html.escape(str(sub or ""))
+            sub_texto = sub_texto.strip()
+            if sub_texto:
+                fragmentos.append(f"<span style='color:#9ca3af;'>{sub_texto}</span>")
+    return "<br>".join(fragmentos)
+
+
+def _render_transcript_html(messages: list) -> str:
+    """Pinta el historial completo de la conversacion (mismo 'messages' que
+    se le manda a Claude) como burbujas de chat, para poder reconstruir
+    exactamente que se pidio/aprobo/cambio si hay algun reclamo."""
+    partes = []
+    for m in messages:
+        role = m.get("role", "?")
+        texto = _extraer_texto_contenido(m.get("content"))
+        if not texto:
+            continue
+        es_usuario = role == "user"
+        alineacion = "left" if es_usuario else "right"
+        fondo = "#f3f4f6" if es_usuario else "#fff7ed"
+        etiqueta = "Cliente" if es_usuario else "Claude"
+        partes.append(f"""
+        <div style="margin:10px 0; text-align:{alineacion};">
+          <div style="display:inline-block; max-width:80%; text-align:left; background:{fondo};
+                      padding:10px 14px; border-radius:10px; font-size:14px; white-space:pre-wrap;">
+            <div style="font-size:11px; font-weight:700; color:#9ca3af; margin-bottom:4px;">{etiqueta}</div>
+            {texto}
+          </div>
+        </div>
+        """)
+    return "".join(partes) or "<p style='color:#9ca3af;'>Sin conversación registrada.</p>"
+
+
+_ADMIN_DETALLE_CSS = """
+body { font-family: -apple-system, system-ui, sans-serif; background:#f9fafb; color:#111827; margin:0; padding:32px 24px; }
+.card { background:white; border-radius:12px; padding:20px 24px; box-shadow:0 1px 3px rgba(0,0,0,0.08); margin-bottom:20px; max-width:720px; }
+a.volver { color:#c2410c; font-weight:600; text-decoration:none; }
+h2 { font-size:13px; text-transform:uppercase; letter-spacing:0.04em; color:#6b7280; margin:0 0 12px; }
+"""
+
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_panel(_: bool = Depends(_verificar_admin)):
     stats = db.get_stats()
@@ -503,6 +596,7 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
               border-radius:999px; font-size:13px; font-weight:600;">{label}</span></td>
           <td>{monto_txt}</td>
           <td style="color:#6b7280; font-size:13px;">{o['created_at'][:16].replace('T', ' ')}</td>
+          <td><a href="/admin/orden/web/{o['session_id']}" style="color:#c2410c; font-weight:600;">Ver</a></td>
         </tr>
         """
 
@@ -532,6 +626,7 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
               border-radius:999px; font-size:13px; font-weight:600;">{label}</span></td>
           <td>{monto}</td>
           <td style="color:#6b7280; font-size:13px;">{o['created_at'][:16].replace('T', ' ')}</td>
+          <td><a href="/admin/orden/telegram/{o['chat_id']}" style="color:#c2410c; font-weight:600;">Ver</a></td>
         </tr>
         """
 
@@ -595,10 +690,10 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
         </p>
         <table style="margin-bottom:32px;">
           <thead>
-            <tr><th>Nombre</th><th>Correo</th><th>País</th><th>Canal</th><th>Estado</th><th>Monto</th><th>Creado</th></tr>
+            <tr><th>Nombre</th><th>Correo</th><th>País</th><th>Canal</th><th>Estado</th><th>Monto</th><th>Creado</th><th></th></tr>
           </thead>
           <tbody>
-            {filas_web or '<tr><td colspan="7" style="text-align:center; color:#9ca3af;">Sin pedidos web todavía</td></tr>'}
+            {filas_web or '<tr><td colspan="8" style="text-align:center; color:#9ca3af;">Sin pedidos web todavía</td></tr>'}
           </tbody>
         </table>
 
@@ -620,12 +715,85 @@ async def admin_panel(_: bool = Depends(_verificar_admin)):
 
         <table>
           <thead>
-            <tr><th>Chat ID</th><th>Canción</th><th>Estado</th><th>Monto</th><th>Creado</th></tr>
+            <tr><th>Chat ID</th><th>Canción</th><th>Estado</th><th>Monto</th><th>Creado</th><th></th></tr>
           </thead>
           <tbody>
-            {filas or '<tr><td colspan="5" style="text-align:center; color:#9ca3af;">Sin pedidos todavía</td></tr>'}
+            {filas or '<tr><td colspan="6" style="text-align:center; color:#9ca3af;">Sin pedidos todavía</td></tr>'}
           </tbody>
         </table>
+      </body>
+    </html>
+    """
+
+
+@app.get("/admin/orden/web/{session_id}", response_class=HTMLResponse)
+async def admin_orden_web(session_id: str, _: bool = Depends(_verificar_admin)):
+    order = db.get_web_order(session_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    transcripcion = _render_transcript_html(db.get_web_messages(session_id))
+    letra = html.escape(order.get("final_lyric") or "")
+    return f"""
+    <html>
+      <head><meta charset="utf-8"><title>Pedido web {session_id[:8]}</title>
+        <style>{_ADMIN_DETALLE_CSS}</style>
+      </head>
+      <body>
+        <a class="volver" href="/admin">← Volver al panel</a>
+        <h1 style="font-size:20px; margin:16px 0;">Pedido web — {html.escape(order.get('customer_name') or 'sin nombre')}</h1>
+        <div class="card">
+          <h2>Datos</h2>
+          <p><strong>Correo:</strong> {html.escape(order.get('email') or '—')}</p>
+          <p><strong>País / idioma:</strong> {html.escape(order.get('country') or '—')} · {html.escape(order.get('language') or 'es')}</p>
+          <p><strong>Pasarela:</strong> {html.escape(order.get('gateway') or '—')}</p>
+          <p><strong>Estado:</strong> {html.escape(order.get('step') or '—')} · pagado: {'sí' if order.get('paid') else 'no'} · entregado: {'sí' if order.get('delivered') else 'no'}</p>
+          <p><strong>Creado:</strong> {(order.get('created_at') or '')[:16].replace('T', ' ')}</p>
+        </div>
+        <div class="card">
+          <h2>Letra aprobada</h2>
+          <p><strong>Título:</strong> {html.escape(order.get('final_title') or '—')}</p>
+          <p><strong>Estilo:</strong> {html.escape(order.get('final_style') or '—')}</p>
+          <div style="white-space:pre-wrap; font-size:14px; line-height:1.6; margin-top:10px;">{letra or '<span style="color:#9ca3af;">Sin letra aprobada todavía.</span>'}</div>
+        </div>
+        <div class="card">
+          <h2>Conversación completa</h2>
+          {transcripcion}
+        </div>
+      </body>
+    </html>
+    """
+
+
+@app.get("/admin/orden/telegram/{chat_id}", response_class=HTMLResponse)
+async def admin_orden_telegram(chat_id: int, _: bool = Depends(_verificar_admin)):
+    order = db.get_order(chat_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    transcripcion = _render_transcript_html(db.get_messages(chat_id))
+    letra = html.escape(order.get("final_lyric") or "")
+    return f"""
+    <html>
+      <head><meta charset="utf-8"><title>Pedido Telegram {chat_id}</title>
+        <style>{_ADMIN_DETALLE_CSS}</style>
+      </head>
+      <body>
+        <a class="volver" href="/admin">← Volver al panel</a>
+        <h1 style="font-size:20px; margin:16px 0;">Pedido Telegram — chat_id {chat_id}</h1>
+        <div class="card">
+          <h2>Estado</h2>
+          <p><strong>Estado:</strong> {html.escape(order.get('step') or '—')} · pagado: {'sí' if order.get('paid') else 'no'} · entregado: {'sí' if order.get('delivered') else 'no'}</p>
+          <p><strong>Creado:</strong> {(order.get('created_at') or '')[:16].replace('T', ' ')}</p>
+        </div>
+        <div class="card">
+          <h2>Letra aprobada</h2>
+          <p><strong>Título:</strong> {html.escape(order.get('final_title') or '—')}</p>
+          <p><strong>Estilo:</strong> {html.escape(order.get('final_style') or '—')}</p>
+          <div style="white-space:pre-wrap; font-size:14px; line-height:1.6; margin-top:10px;">{letra or '<span style="color:#9ca3af;">Sin letra aprobada todavía.</span>'}</div>
+        </div>
+        <div class="card">
+          <h2>Conversación completa</h2>
+          {transcripcion}
+        </div>
       </body>
     </html>
     """
@@ -1094,9 +1262,14 @@ async def check_and_deliver_web(order: dict):
     if order.get("email"):
         language = order.get("language", "es")
         titulo_default = "Your song" if language == "en" else "Tu canción"
+        lyrics_pdf_url = (
+            f"{BASE_URL}/web/lyrics-pdf/{order['session_id']}"
+            if language == "en" and order.get("final_lyric")
+            else None
+        )
         enviado = await enviar_cancion_por_correo(
             order["email"], order.get("final_title") or titulo_default, audio_urls,
-            language=language,
+            language=language, lyrics_pdf_url=lyrics_pdf_url,
         )
         if enviado:
             db.update_web_order(order["session_id"], delivered_email=1)
