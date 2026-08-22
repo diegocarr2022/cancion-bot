@@ -12,6 +12,8 @@ calcados de LANDING_HTML_EN (ver app/landing.py: --ink #16110d, --paper
 import io
 from xml.sax.saxutils import escape as _esc
 
+from reportlab.graphics.barcode.qr import QrCodeWidget
+from reportlab.graphics.shapes import Drawing
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import LETTER
@@ -49,9 +51,26 @@ def _draw_chrome(canvas, _doc):
     canvas.restoreState()
 
 
-def build_lyrics_pdf(title: str, style: str, lyric: str) -> bytes:
+def _qr_drawing(data: str, size: float) -> Drawing:
+    """QR code como Flowable de reportlab (Drawing ya hereda de Flowable, se
+    puede meter directo en el "story") - sin librerias externas (ni qrcode
+    ni Pillow), reportlab ya trae el generador de codigos de barra/QR."""
+    widget = QrCodeWidget(data)
+    x0, y0, x1, y1 = widget.getBounds()
+    w, h = x1 - x0, y1 - y0
+    drawing = Drawing(size, size, transform=[size / w, 0, 0, size / h, -x0 * size / w, -y0 * size / h])
+    drawing.add(widget)
+    drawing.hAlign = "CENTER"
+    return drawing
+
+
+def build_lyrics_pdf(title: str, style: str, lyric: str, song_url: str | None = None) -> bytes:
     """Devuelve los bytes del PDF (una o mas paginas segun el largo de la
-    letra - SimpleDocTemplate pagina solo automaticamente)."""
+    letra - SimpleDocTemplate pagina solo automaticamente). Si se pasa
+    song_url, se agrega un QR chiquito al final (despues de la letra, no en
+    el pie de cada pagina - asi aparece una sola vez, donde sea que termine
+    cayendo segun el largo de la letra) para que puedan escanearlo y volver
+    directo a su cancion."""
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf,
@@ -92,6 +111,15 @@ def build_lyrics_pdf(title: str, style: str, lyric: str) -> bytes:
             story.append(Paragraph(_esc(line.upper()), tag_style))
         else:
             story.append(Paragraph(_esc(line), line_style))
+
+    if song_url:
+        qr_caption_style = ParagraphStyle(
+            "QRCaption", fontName="Helvetica", fontSize=9, leading=11,
+            textColor=INK_SOFT, alignment=TA_CENTER, spaceBefore=8,
+        )
+        story.append(Spacer(1, 28))
+        story.append(_qr_drawing(song_url, 0.9 * inch))
+        story.append(Paragraph("Scan to play your song", qr_caption_style))
 
     doc.build(story, onFirstPage=_draw_chrome, onLaterPages=_draw_chrome)
     return buf.getvalue()
