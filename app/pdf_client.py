@@ -20,6 +20,7 @@ variables directamente, necesita un TTF estatico para poder embeberlo.
 """
 import io
 import os
+import re
 from xml.sax.saxutils import escape as _esc
 
 from reportlab.graphics.barcode.qr import QrCodeWidget
@@ -68,6 +69,17 @@ def _draw_chrome(canvas, _doc):
     canvas.restoreState()
 
 
+def _normalizar(texto: str) -> str:
+    """Para decidir si dos bloques (ej. el Chorus y el Final Chorus) son "la
+    misma letra" y se puede colapsar el segundo a "Repeat" - se ignoran
+    mayusculas/puntuacion/saltos de linea, porque en la practica Suno/Claude
+    a veces varian un signo de exclamacion o una mayuscula entre una
+    repeticion y otra sin que sea realmente una letra distinta."""
+    texto = texto.lower()
+    texto = re.sub(r"[^a-z0-9\s]", "", texto)
+    return re.sub(r"\s+", " ", texto).strip()
+
+
 def _qr_drawing(data: str, size: float) -> Drawing:
     """QR code como Flowable de reportlab (Drawing ya hereda de Flowable, se
     puede meter directo en el "story") - sin librerias externas (ni qrcode
@@ -81,52 +93,53 @@ def _qr_drawing(data: str, size: float) -> Drawing:
     return drawing
 
 
-def build_lyrics_pdf(title: str, style: str, lyric: str, song_url: str | None = None) -> bytes:
+def build_lyrics_pdf(title: str, lyric: str, song_url: str | None = None) -> bytes:
     """Devuelve los bytes del PDF (una o mas paginas segun el largo de la
-    letra - SimpleDocTemplate pagina solo automaticamente). Si se pasa
-    song_url, se agrega un QR chiquito al final (despues de la letra, no en
-    el pie de cada pagina - asi aparece una sola vez, donde sea que termine
-    cayendo segun el largo de la letra) para que puedan escanearlo y volver
-    directo a su cancion."""
+    letra - SimpleDocTemplate pagina solo automaticamente, aunque el ajuste
+    de tamanos de fuente esta pensado para que una letra de largo tipico
+    entre en una sola hoja). Si se pasa song_url, se agrega un QR chiquito
+    al final (despues de la letra, no en el pie de cada pagina - asi aparece
+    una sola vez, donde sea que termine cayendo segun el largo de la letra)
+    para que puedan escanearlo y volver directo a su cancion.
+
+    Deliberadamente NO incluye el genero/estilo musical (a pedido de Diego:
+    solo titulo + letra, para que quepa mejor en una hoja)."""
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf,
         pagesize=LETTER,
-        topMargin=_HEADER_H + 0.45 * inch,
-        bottomMargin=_FOOTER_H + 0.3 * inch,
+        topMargin=_HEADER_H + 0.4 * inch,
+        bottomMargin=_FOOTER_H + 0.25 * inch,
         leftMargin=0.9 * inch,
         rightMargin=0.9 * inch,
         title=title or "Your song",
     )
 
     title_style = ParagraphStyle(
-        "SongTitle", fontName=_FONT_TITLE, fontSize=26, leading=31,
-        textColor=INK, alignment=TA_CENTER, spaceAfter=6,
-    )
-    style_style = ParagraphStyle(
-        "SongStyle", fontName="Helvetica-Oblique", fontSize=11, leading=14,
-        textColor=INK_SOFT, alignment=TA_CENTER, spaceAfter=20,
+        "SongTitle", fontName=_FONT_TITLE, fontSize=21, leading=25,
+        textColor=INK, alignment=TA_CENTER, spaceAfter=16,
     )
     tag_style = ParagraphStyle(
-        "Tag", fontName="Helvetica-Bold", fontSize=10.5, leading=13,
-        textColor=AMBER, alignment=TA_CENTER, spaceBefore=14, spaceAfter=4,
+        "Tag", fontName="Helvetica-Bold", fontSize=9, leading=11,
+        textColor=AMBER, alignment=TA_CENTER, spaceBefore=9, spaceAfter=3,
     )
     line_style = ParagraphStyle(
-        "Line", fontName="Helvetica", fontSize=11.5, leading=16,
+        "Line", fontName="Helvetica", fontSize=9.5, leading=13,
         textColor=INK, alignment=TA_CENTER,
     )
     repeat_style = ParagraphStyle(
-        "Repeat", fontName="Helvetica-Oblique", fontSize=11, leading=16,
+        "Repeat", fontName="Helvetica-Oblique", fontSize=9.5, leading=13,
         textColor=INK_SOFT, alignment=TA_CENTER,
     )
 
     story = [Paragraph(_esc(title or "Your song"), title_style)]
-    story.append(Paragraph(_esc(style), style_style) if style else Spacer(1, 18))
 
     # Partir la letra en secciones [Tag] + cuerpo, para poder colapsar un
-    # bloque repetido (mismo Coro/Pre-Coro que ya aparecio antes, palabra por
-    # palabra) a un simple "Repeat" en vez de repetirlo completo - asi entra
-    # en una sola hoja aunque la cancion tenga el coro 2-3 veces.
+    # bloque repetido (mismo Coro/Pre-Coro/Final Chorus que ya aparecio
+    # antes) a un simple "Repeat" en vez de repetirlo completo - asi entra
+    # en una sola hoja aunque la cancion tenga el coro 2-3 veces. Se compara
+    # normalizado (ver _normalizar) para que una coma o mayuscula de mas en
+    # el Final Chorus no le impida matchear con el Chorus de antes.
     secciones = []
     tag_actual = None
     cuerpo_actual = []
@@ -144,7 +157,7 @@ def build_lyrics_pdf(title: str, style: str, lyric: str, song_url: str | None = 
     for tag, cuerpo in secciones:
         if tag:
             story.append(Paragraph(_esc(tag.upper()), tag_style))
-        normalizado = "\n".join(l for l in cuerpo if l).strip().lower()
+        normalizado = _normalizar("\n".join(cuerpo))
         if tag and normalizado and normalizado in cuerpos_vistos:
             story.append(Paragraph("Repeat", repeat_style))
             continue
@@ -152,7 +165,7 @@ def build_lyrics_pdf(title: str, style: str, lyric: str, song_url: str | None = 
             cuerpos_vistos.add(normalizado)
         for line in cuerpo:
             if not line:
-                story.append(Spacer(1, 6))
+                story.append(Spacer(1, 3))
             else:
                 story.append(Paragraph(_esc(line), line_style))
 

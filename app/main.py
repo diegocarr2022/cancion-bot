@@ -340,7 +340,6 @@ async def web_lyrics_pdf(session_id: str):
     song_url = f"{BASE_URL}{ruta_resumen}?session_id={session_id}"
     pdf_bytes = build_lyrics_pdf(
         order.get("final_title") or "Your song",
-        order.get("final_style") or "",
         order["final_lyric"],
         song_url=song_url,
     )
