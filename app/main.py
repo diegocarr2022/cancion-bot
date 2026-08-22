@@ -336,12 +336,9 @@ async def web_lyrics_pdf(session_id: str):
     order = db.get_web_order(session_id)
     if not order or not order.get("final_lyric"):
         raise HTTPException(status_code=404, detail="No hay letra todavia para esta sesion")
-    ruta_resumen = "/" if order.get("language") == "en" else "/cancion"
-    song_url = f"{BASE_URL}{ruta_resumen}?session_id={session_id}"
     pdf_bytes = build_lyrics_pdf(
         order.get("final_title") or "Your song",
         order["final_lyric"],
-        song_url=song_url,
     )
     slug = re.sub(r"[^a-z0-9]+", "-", (order.get("final_title") or "tunecraft-song").lower()).strip("-") or "tunecraft-song"
     return Response(

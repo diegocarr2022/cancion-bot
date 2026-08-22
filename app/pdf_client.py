@@ -23,8 +23,6 @@ import os
 import re
 from xml.sax.saxutils import escape as _esc
 
-from reportlab.graphics.barcode.qr import QrCodeWidget
-from reportlab.graphics.shapes import Drawing
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import LETTER
@@ -32,7 +30,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Spacer
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 INK = colors.HexColor("#16110d")
 PAPER = colors.HexColor("#efe4cc")
@@ -80,30 +78,15 @@ def _normalizar(texto: str) -> str:
     return re.sub(r"\s+", " ", texto).strip()
 
 
-def _qr_drawing(data: str, size: float) -> Drawing:
-    """QR code como Flowable de reportlab (Drawing ya hereda de Flowable, se
-    puede meter directo en el "story") - sin librerias externas (ni qrcode
-    ni Pillow), reportlab ya trae el generador de codigos de barra/QR."""
-    widget = QrCodeWidget(data)
-    x0, y0, x1, y1 = widget.getBounds()
-    w, h = x1 - x0, y1 - y0
-    drawing = Drawing(size, size, transform=[size / w, 0, 0, size / h, -x0 * size / w, -y0 * size / h])
-    drawing.add(widget)
-    drawing.hAlign = "CENTER"
-    return drawing
-
-
-def build_lyrics_pdf(title: str, lyric: str, song_url: str | None = None) -> bytes:
+def build_lyrics_pdf(title: str, lyric: str) -> bytes:
     """Devuelve los bytes del PDF (una o mas paginas segun el largo de la
     letra - SimpleDocTemplate pagina solo automaticamente, aunque el ajuste
     de tamanos de fuente esta pensado para que una letra de largo tipico
-    entre en una sola hoja). Si se pasa song_url, se agrega un QR chiquito
-    al final (despues de la letra, no en el pie de cada pagina - asi aparece
-    una sola vez, donde sea que termine cayendo segun el largo de la letra)
-    para que puedan escanearlo y volver directo a su cancion.
+    entre en una sola hoja).
 
-    Deliberadamente NO incluye el genero/estilo musical (a pedido de Diego:
-    solo titulo + letra, para que quepa mejor en una hoja)."""
+    Deliberadamente NO incluye el genero/estilo musical ni un QR (a pedido
+    de Diego: solo titulo + letra, para que quepa en una hoja - el QR que
+    se probo antes le quitaba el espacio que le faltaba)."""
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf,
@@ -168,17 +151,6 @@ def build_lyrics_pdf(title: str, lyric: str, song_url: str | None = None) -> byt
                 story.append(Spacer(1, 3))
             else:
                 story.append(Paragraph(_esc(line), line_style))
-
-    if song_url:
-        qr_caption_style = ParagraphStyle(
-            "QRCaption", fontName="Helvetica", fontSize=9, leading=11,
-            textColor=INK_SOFT, alignment=TA_CENTER, spaceBefore=8,
-        )
-        story.append(Spacer(1, 10))
-        story.append(KeepTogether([
-            _qr_drawing(song_url, 0.75 * inch),
-            Paragraph("Scan to play your song", qr_caption_style),
-        ]))
 
     doc.build(story, onFirstPage=_draw_chrome, onLaterPages=_draw_chrome)
     return buf.getvalue()
