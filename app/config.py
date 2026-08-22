@@ -200,6 +200,21 @@ PENDING_PAYMENT_BACKOFF_MINUTOS = int(os.environ.get("PENDING_PAYMENT_BACKOFF_MI
 # advertencia) - no bloquea la entrega de la cancion.
 META_PIXEL_ID = os.environ.get("META_PIXEL_ID", "")
 META_CAPI_ACCESS_TOKEN = os.environ.get("META_CAPI_ACCESS_TOKEN", "")
+
+# --- Google Analytics 4 / Google Ads conversion tracking ---
+# GA_MEASUREMENT_ID: ID de la propiedad de GA4 (formato "G-XXXXXXXXXX"),
+# Admin > Flujos de datos > tu flujo web > "ID de medicion". No es secreto.
+# GOOGLE_ADS_CONVERSION_ID: ID de la cuenta de Google Ads (formato
+# "AW-XXXXXXXXXX"), aparece al crear cualquier accion de conversion.
+# GOOGLE_ADS_CONVERSION_LABEL: el label especifico de la accion de
+# conversion de "Compra" (Herramientas > Conversiones > tu accion >
+# "Configuracion de la etiqueta"). Ninguno de los 3 es secreto (van del lado
+# del navegador igual que META_PIXEL_ID) - si falta alguno, la landing sigue
+# funcionando igual, simplemente sin ese tracking especifico (ver
+# google_ads_script() en landing.py).
+GA_MEASUREMENT_ID = os.environ.get("GA_MEASUREMENT_ID", "")
+GOOGLE_ADS_CONVERSION_ID = os.environ.get("GOOGLE_ADS_CONVERSION_ID", "")
+GOOGLE_ADS_CONVERSION_LABEL = os.environ.get("GOOGLE_ADS_CONVERSION_LABEL", "")
 # Codigo de prueba opcional (pestaña "Test Events" en Events Manager) - solo
 # se usa mientras se esta verificando que los eventos lleguen bien.
 META_CAPI_TEST_EVENT_CODE = os.environ.get("META_CAPI_TEST_EVENT_CODE", "")

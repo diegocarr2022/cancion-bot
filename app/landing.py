@@ -43,7 +43,15 @@ codigo compartido. main.py elige cual servir segun ?lang= en la URL o el
 header Accept-Language (ver /cancion en main.py).
 """
 
-from app.config import META_PIXEL_ID, BRAND_NAME_EN, BASE_URL, LAUNCH_PRICE_ENDS_AT
+from app.config import (
+    META_PIXEL_ID,
+    BRAND_NAME_EN,
+    BASE_URL,
+    LAUNCH_PRICE_ENDS_AT,
+    GA_MEASUREMENT_ID,
+    GOOGLE_ADS_CONVERSION_ID,
+    GOOGLE_ADS_CONVERSION_LABEL,
+)
 
 
 def pixel_script(track_calls: str, noscript_ev: str = "PageView") -> str:
@@ -82,6 +90,35 @@ fbq('init', '{META_PIXEL_ID}');
 
 
 _META_PIXEL_SCRIPT = pixel_script("fbq('track', 'PageView');")
+
+
+def google_ads_script(extra_calls: str = "") -> str:
+    """Arma el bloque <script> base de gtag.js (GA4 + Google Ads) - mismo
+    patron que pixel_script() de arriba. Con GA_MEASUREMENT_ID configurado ya
+    manda pageviews solo; extra_calls es para el evento de conversion que se
+    dispara en /pago-exitoso/web/{session_id} (ver main.py). Devuelve string
+    vacio si no hay NINGUN ID configurado, para que la landing funcione igual
+    sin este tracking."""
+    if not GA_MEASUREMENT_ID and not GOOGLE_ADS_CONVERSION_ID:
+        return ""
+    load_id = GA_MEASUREMENT_ID or GOOGLE_ADS_CONVERSION_ID
+    config_calls = ""
+    if GA_MEASUREMENT_ID:
+        config_calls += f"gtag('config', '{GA_MEASUREMENT_ID}');\n"
+    if GOOGLE_ADS_CONVERSION_ID:
+        config_calls += f"gtag('config', '{GOOGLE_ADS_CONVERSION_ID}');\n"
+    return f"""
+<script async src="https://www.googletagmanager.com/gtag/js?id={load_id}"></script>
+<script>
+window.dataLayer = window.dataLayer || [];
+function gtag(){{dataLayer.push(arguments);}}
+gtag('js', new Date());
+{config_calls}{extra_calls}
+</script>
+"""
+
+
+_GOOGLE_ADS_SCRIPT = google_ads_script()
 
 # Reemplazado por SAMPLE_STYLES (grid de 6 generos, ago 2026) - se deja vacia
 # para no mostrar una seccion duplicada/con audios que ya no existen con
@@ -184,6 +221,7 @@ LANDING_HTML_ES = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tu canción personalizada</title>
 ___META_PIXEL_SCRIPT___
+___GOOGLE_ADS_SCRIPT___
 <style>
   * { box-sizing: border-box; }
   body {
@@ -539,6 +577,7 @@ LANDING_HTML_ES = LANDING_HTML_ES.replace(
     "___PASOS_Y_MUESTRAS___", _PASOS_HTML + _ESTILOS_HTML + _MUESTRAS_HTML
 )
 LANDING_HTML_ES = LANDING_HTML_ES.replace("___META_PIXEL_SCRIPT___", _META_PIXEL_SCRIPT)
+LANDING_HTML_ES = LANDING_HTML_ES.replace("___GOOGLE_ADS_SCRIPT___", _GOOGLE_ADS_SCRIPT)
 
 
 # ---------------------------------------------------------------------------
@@ -640,6 +679,7 @@ LANDING_HTML_EN = """<!DOCTYPE html>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,900&family=Caveat:wght@600&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 ___JSON_LD___
 ___META_PIXEL_SCRIPT___
+___GOOGLE_ADS_SCRIPT___
 <style>
   :root {
     --ink: #16110d; --ink-raised: #1e1710; --paper: #efe4cc; --paper-dim: #e4d7ba;
@@ -1162,6 +1202,7 @@ iniciar();
 """
 
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___META_PIXEL_SCRIPT___", _META_PIXEL_SCRIPT_EN)
+LANDING_HTML_EN = LANDING_HTML_EN.replace("___GOOGLE_ADS_SCRIPT___", _GOOGLE_ADS_SCRIPT)
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___JSON_LD___", _JSON_LD_EN)
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___CANONICAL_URL___", f"{BASE_URL}/")
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___LAUNCH_PRICE_ENDS_AT_ISO___", LAUNCH_PRICE_ENDS_AT)

@@ -27,11 +27,13 @@ from app.config import (
     PENDING_PAYMENT_BACKOFF_MINUTOS,
     ENABLE_VIDEO_TIER,
     BRAND_NAME_EN,
+    GOOGLE_ADS_CONVERSION_ID,
+    GOOGLE_ADS_CONVERSION_LABEL,
 )
 from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
 from app.email_client import enviar_cancion_por_correo
-from app.landing import LANDING_HTML_ES, LANDING_HTML_EN, pixel_script
+from app.landing import LANDING_HTML_ES, LANDING_HTML_EN, pixel_script, google_ads_script
 from app.legal import TERMINOS_HTML, PRIVACIDAD_HTML, TERMS_HTML_EN, PRIVACY_HTML_EN
 from app.payment_confirm import confirmar_pago, confirmar_pago_web
 from app.pdf_client import build_lyrics_pdf
@@ -398,6 +400,32 @@ async def pago_exitoso_web(session_id: str):
         noscript_ev="Purchase",
     )
 
+    # Evento de conversion de Google (GA4 "purchase" + conversion de Google
+    # Ads, si esta configurada) - mismo momento/logica que el pixel de Meta
+    # de arriba. GA_MEASUREMENT_ID/GOOGLE_ADS_CONVERSION_ID vacios ya hacen
+    # que google_ads_script() no imprima nada (ver landing.py), asi que este
+    # bloque es seguro de dejar siempre activo aunque todavia no este
+    # configurado ningun ID.
+    _google_calls = (
+        "gtag('event', 'purchase', {transaction_id: %s, value: %s, currency: %s});"
+        % (
+            repr(f"web-{session_id}"),
+            repr(float(order.get("amount_mxn") or 0)),
+            repr(order.get("currency") or "MXN"),
+        )
+    )
+    if GOOGLE_ADS_CONVERSION_ID and GOOGLE_ADS_CONVERSION_LABEL:
+        _google_calls += (
+            "gtag('event', 'conversion', {send_to: %s, value: %s, currency: %s, transaction_id: %s});"
+            % (
+                repr(f"{GOOGLE_ADS_CONVERSION_ID}/{GOOGLE_ADS_CONVERSION_LABEL}"),
+                repr(float(order.get("amount_mxn") or 0)),
+                repr(order.get("currency") or "MXN"),
+                repr(f"web-{session_id}"),
+            )
+        )
+    google_html = google_ads_script(_google_calls)
+
     if order.get("language") == "en":
         # Este pago ocurre en la misma pestana (el boton de pago ya no abre
         # target=_blank) - en vez de dejar al cliente en una pagina estatica
@@ -407,7 +435,7 @@ async def pago_exitoso_web(session_id: str):
         # la raiz ya sabe leer ?session_id= y mostrar el estado correcto).
         return f"""
         <html>
-          <head><meta charset="utf-8"><title>{BRAND_NAME_EN} — Payment received</title>{pixel_html}</head>
+          <head><meta charset="utf-8"><title>{BRAND_NAME_EN} — Payment received</title>{pixel_html}{google_html}</head>
           <body style="font-family: sans-serif; text-align: center; padding: 60px 20px;">
             <p style="font-weight:800; color:#d96b2b; margin-bottom:4px;">{BRAND_NAME_EN}</p>
             <h1>🎵 Payment received!</h1>
@@ -422,7 +450,7 @@ async def pago_exitoso_web(session_id: str):
 
     return f"""
     <html>
-      <head><meta charset="utf-8"><title>Pago recibido</title>{pixel_html}</head>
+      <head><meta charset="utf-8"><title>Pago recibido</title>{pixel_html}{google_html}</head>
       <body style="font-family: sans-serif; text-align: center; padding: 60px 20px;">
         <h1>🎵 ¡Pago recibido!</h1>
         <p>Ya puedes cerrar esta pestaña y volver a la otra donde estaba tu canción -

@@ -56,6 +56,12 @@ services:
         sync: false
       - key: META_CAPI_TEST_EVENT_CODE
         sync: false
+      - key: GA_MEASUREMENT_ID
+        sync: false
+      - key: GOOGLE_ADS_CONVERSION_ID
+        sync: false
+      - key: GOOGLE_ADS_CONVERSION_LABEL
+        sync: false
       - key: PAYPAL_CLIENT_ID
         sync: false
       - key: PAYPAL_CLIENT_SECRET
