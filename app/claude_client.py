@@ -249,6 +249,16 @@ que apruebe la letra, no antes. Tampoco dejo su nombre ni su correo todavia
    mensaje (una vez que te diga su nombre), arrancas con las preguntas del
    punto 1, idealmente llamandolo por su nombre para que se sienta atendido.
 
+0.5. Si en CUALQUIER momento el cliente da a entender que ya tiene un pedido
+   de antes (ej. "ya pague pero no encuentro mi cancion", "me salio un error
+   despues de pagar", "donde esta mi cancion", "perdi la pagina") - esto
+   puede pasar si cerro la pestaña, le fallo el pago, o volvio en una
+   ventana nueva sin el link original - pedile su correo si todavia no lo
+   tenes y llama a la funcion buscar_pedido_por_correo en vez de seguir la
+   charla normal. Es MUCHO mejor recuperarle su pedido real que hacerlo
+   empezar una cancion nueva de cero sin darse cuenta de que ya habia
+   pagado.
+
 1. Preguntar de forma natural (NO como formulario ni checklist rigido) sobre:
    para quien es la cancion, la relacion con esa persona, la ocasion, el
    genero/estilo musical que prefiere, si quiere voz masculina o femenina, y
@@ -403,7 +413,29 @@ WEB_CONTENT_TOOLS = [
             },
             "required": ["title", "style", "lyric", "customer_name", "email"],
         },
-    }
+    },
+    {
+        "name": "buscar_pedido_por_correo",
+        "description": (
+            "Buscar un pedido anterior de este cliente por correo, para cuando "
+            "parece que ya tiene un pedido de una sesion perdida (ej. dice que ya "
+            "pago pero no encuentra su cancion, le fallo el pago, o volvio en una "
+            "ventana nueva). Si se encuentra, al cliente se lo redirige "
+            "automaticamente a la pantalla correcta de ese pedido (pantalla de pago, "
+            "de espera, o de descarga segun corresponda) - vos solo tenes que "
+            "avisarle con calidez en tu mensaje de texto que ya lo encontraste."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "description": "El correo que el cliente dio para buscar su pedido anterior.",
+                },
+            },
+            "required": ["email"],
+        },
+    },
 ]
 
 
@@ -428,6 +460,16 @@ conversation. Your job is to:
    message yet. Only in your NEXT message (once they tell you their name) do
    you start with the questions from point 1, ideally calling them by name
    so they feel taken care of.
+
+0.5. If at ANY point the customer implies they already have an order from a
+   previous session (e.g. "I already paid but can't find my song", "I got an
+   error after paying", "where's my song", "I lost the page") - this can
+   happen if they closed the tab, their payment failed, or they came back in
+   a new window without the original link - ask for their email if you don't
+   have it yet and call the find_previous_order function instead of
+   continuing the normal flow. Recovering their real order is much better
+   than making them start a brand new song without realizing they already
+   paid.
 
 1. Ask naturally (NOT like a rigid form or checklist) about: who the song is
    for, their relationship to that person, the occasion, the musical
@@ -566,5 +608,27 @@ WEB_CONTENT_TOOLS_EN = [
             },
             "required": ["title", "style", "lyric", "customer_name", "email"],
         },
-    }
+    },
+    {
+        "name": "find_previous_order",
+        "description": (
+            "Look up a previous order for this customer by email, for when it "
+            "seems like they already have an order from a lost session (e.g. they "
+            "say they already paid but can't find their song, their payment "
+            "failed, or they came back in a new window). If one is found, the "
+            "customer is automatically redirected to the right screen for that "
+            "order (payment, waiting, or download, whichever applies) - you just "
+            "need to warmly let them know in your text message that you found it."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "description": "The email the customer gave to look up their previous order.",
+                },
+            },
+            "required": ["email"],
+        },
+    },
 ]

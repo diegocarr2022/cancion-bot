@@ -466,7 +466,15 @@ async function enviarTurno(texto) {
 
   (data.mensajes || []).forEach((m) => agregarMensaje(m, "bot"));
 
-  if (data.listo_para_pagar && data.payment_url) {
+  if (data.redirect_session_id) {
+    // Se encontro un pedido anterior real (buscar_pedido_por_correo) - se
+    // deja un momento para que lea el mensaje de Claude y se manda a la
+    // sesion real, que va a mostrar la pantalla correcta sola (pago,
+    // espera, o descarga) al cargar.
+    setTimeout(() => {
+      window.location.href = "/cancion?session_id=" + encodeURIComponent(data.redirect_session_id);
+    }, 1800);
+  } else if (data.listo_para_pagar && data.payment_url) {
     $("link-pago").href = data.payment_url;
     $("pago-box").style.display = "block";
     $("chat").style.display = "none";
@@ -1016,10 +1024,16 @@ async function iniciar() {
   const sessionExistente = params.get("session_id");
   if (sessionExistente) {
     sessionId = sessionExistente;
-    $("chat-section").style.display = "none";
+    // Ocultar solo la tarjeta del chat (#chat), NO toda la seccion
+    // #chat-section - pago-box/estado-box/descarga-box viven adentro de esa
+    // misma seccion como hermanos de #chat, asi que ocultar la seccion
+    // entera los tapaba a ellos tambien aunque retomarSesion() los marcara
+    // visibles. Eso dejaba al cliente con la pantalla en blanco justo al
+    // volver de pagar en PayPal, sin forma de recuperar su sesion.
+    $("chat").style.display = "none";
     const ok = await retomarSesion();
     if (ok) return;
-    $("chat-section").style.display = "block";
+    $("chat").style.display = "block";
   }
   const source = params.get("source") || null;
   const country = params.get("country") || null;
@@ -1097,7 +1111,11 @@ async function enviarTurno(texto) {
     data = await resp.json();
   } finally { ocultarEscribiendo(); }
   (data.mensajes || []).forEach((m) => agregarMensaje(m, "bot"));
-  if (data.listo_para_pagar && data.payment_url) {
+  if (data.redirect_session_id) {
+    setTimeout(() => {
+      window.location.href = "/?session_id=" + encodeURIComponent(data.redirect_session_id);
+    }, 1800);
+  } else if (data.listo_para_pagar && data.payment_url) {
     $("link-pago").href = data.payment_url;
     $("pago-box").style.display = "block";
     $("chat").style.display = "none";

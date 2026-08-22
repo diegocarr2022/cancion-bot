@@ -545,6 +545,26 @@ def get_web_order(session_id: str):
         return dict(row) if row else None
 
 
+def find_recent_web_order_by_email(email: str, language: str | None = None):
+    """El pedido web mas reciente con ese correo - usado por la herramienta
+    de recuperacion de sesion perdida (buscar_pedido_por_correo /
+    find_previous_order en claude_client.py) para cuando el cliente vuelve
+    sin su session_id original (cerro la pestaña, le fallo el pago, etc.).
+    Filtrado por idioma para no confundir un pedido ES con uno EN si por
+    casualidad coincide el correo entre mercados. Si el mismo correo tiene
+    varios pedidos, se queda con el mas reciente - una limitacion conocida
+    para el caso raro de alguien con mas de un pedido activo a la vez."""
+    with get_conn() as conn:
+        query = "SELECT * FROM web_orders WHERE LOWER(email) = LOWER(?)"
+        params = [email.strip()]
+        if language:
+            query += " AND language = ?"
+            params.append(language)
+        query += " ORDER BY created_at DESC LIMIT 1"
+        row = conn.execute(query, params).fetchone()
+        return dict(row) if row else None
+
+
 def create_web_order(
     session_id: str,
     email: str | None = None,

@@ -43,6 +43,187 @@ KICKOFF_TEXT_EN = (
 )
 
 
+async def _crear_link_pago(session_id: str, order: dict, precio: dict) -> dict:
+    """Crea (o re-crea) el link de pago de un pedido web con letra ya
+    aprobada. Separado de _finalizar_letra para poder reutilizarlo desde
+    _buscar_pedido_por_correo: si se recupera un pedido sin pagar, el link
+    viejo puede haber expirado o el pago haber sido rechazado, asi que ahi
+    se genera uno FRESCO en vez de devolver el que ya podria estar muerto."""
+    order_id = f"web-{session_id}-{int(time.time())}"
+    # EE.UU. paga via PayPal (dLocal Go no puede cobrarle a alguien
+    # fisicamente en EE.UU. - ver app/paypal_client.py); el resto de paises
+    # sigue con dLocal Go, sin cambios. Ambas ramas dejan `payment` con el
+    # mismo shape {"redirect_url", "id"}.
+    es_estados_unidos = (order.get("country") or "MX") == "US"
+    descripcion = "Personalized song" if es_estados_unidos else "Canción personalizada"
+    if order.get("tier") == "song_video":
+        descripcion += " + video"
+
+    if es_estados_unidos:
+        payment = await create_paypal_order(
+            amount=precio["amount"],
+            currency=precio["currency"],
+            order_id=order_id,
+            description=descripcion,
+            return_url=f"{BASE_URL}/pago-exitoso/web/{session_id}",
+            cancel_url=f"{BASE_URL}/?session_id={session_id}",
+        )
+        gateway = "paypal"
+    else:
+        payment = await create_payment(
+            amount=precio["amount"],
+            currency=precio["currency"],
+            country=(order.get("country") or "MX"),
+            order_id=order_id,
+            description=descripcion,
+            notification_url=f"{BASE_URL}/dlocal/webhook",
+            # session_id va en el PATH, no en query string: algunos gateways
+            # de pago (dLocal Go incluido) no garantizan que preserven query
+            # params custom al armar la redireccion final - un segmento de
+            # path es mucho mas dificil de perder o pisar que un
+            # "?param=valor".
+            success_url=f"{BASE_URL}/pago-exitoso/web/{session_id}",
+        )
+        gateway = "dlocal"
+
+    db.update_web_order(
+        session_id,
+        step="esperando_pago",
+        payment_url=payment["redirect_url"],
+        payment_request_id=payment["id"],
+        amount_mxn=precio["amount"],
+        gateway=gateway,
+    )
+    return payment
+
+
+async def _finalizar_letra(session_id: str, order: dict, precio: dict, tool_input: dict, resultado: dict) -> str:
+    title = tool_input.get("title", "")
+    style = tool_input.get("style", "")
+    lyric = tool_input.get("lyric", "")
+    email = (tool_input.get("email") or "").strip()
+    customer_name = (tool_input.get("customer_name") or "").strip()
+    # solo lo llena el tool schema en ingles (WEB_CONTENT_TOOLS_EN) - el de
+    # ES no tiene este campo, asi que aca siempre da None y no cambia nada
+    # del flujo en espanol.
+    vocal_gender = tool_input.get("vocal_gender")
+    if vocal_gender not in ("f", "m"):
+        vocal_gender = None
+    # misma red de seguridad que en Telegram: separar estilo pegado al
+    # inicio de la letra si Claude lo mezclo por error.
+    idx = lyric.find("[")
+    if idx > 0:
+        prefijo = lyric[:idx].strip(" \n:-")
+        if prefijo:
+            lyric = lyric[idx:].lstrip()
+            style = f"{style} {prefijo}".strip() if style else prefijo
+
+    db.save_web_final_letra(session_id, title, style, lyric, gender=vocal_gender)
+    if email and "@" in email:
+        db.update_web_order(session_id, email=email)
+    else:
+        log.warning(
+            "finalizar_letra (web) llamado sin un correo valido para session_id=%s: %r",
+            session_id, email,
+        )
+    if customer_name:
+        db.update_web_order(session_id, customer_name=customer_name)
+    else:
+        log.warning(
+            "finalizar_letra (web) llamado sin nombre para session_id=%s", session_id
+        )
+
+    try:
+        payment = await _crear_link_pago(session_id, order, precio)
+    except Exception:
+        log.exception(
+            "Error creando el pago web para session_id=%s", session_id,
+        )
+        return (
+            "Hubo un problema tecnico generando el link de pago. Decile al cliente "
+            "que ya lo estamos revisando y que intente de nuevo en un momento."
+        )
+
+    resultado["listo_para_pagar"] = True
+    resultado["payment_url"] = payment["redirect_url"]
+    return (
+        "Se genero el link de pago correctamente. Ya se le va a mostrar el boton de "
+        "pago en la pantalla - en tu mensaje de texto avisale con calidez que la letra "
+        "quedo lista y que puede pagar cuando quiera para arrancar la generacion."
+    )
+
+
+async def _buscar_pedido_por_correo(tool_input: dict, order: dict, resultado: dict) -> str:
+    email = (tool_input.get("email") or "").strip()
+    if not email or "@" not in email:
+        return "El cliente no dio un correo valido. Pedile que te lo repita bien."
+
+    encontrado = db.find_recent_web_order_by_email(email, language=order.get("language"))
+    if not encontrado:
+        return (
+            "No se encontro ningun pedido con ese correo. Decile al cliente que revise "
+            "que este bien escrito, o si prefiere, seguimos armando una cancion nueva."
+        )
+
+    found_session_id = encontrado["session_id"]
+    nombre = encontrado.get("customer_name") or "el cliente"
+    titulo = encontrado.get("final_title") or "su canción"
+
+    if encontrado.get("delivered"):
+        resultado["redirect_session_id"] = found_session_id
+        return (
+            f"Se encontro el pedido de {nombre} ('{titulo}'), YA ENTREGADO. Decile "
+            "calidamente que ya encontraste su pedido y que en un segundo lo vas a "
+            "llevar de vuelta a la pantalla con su cancion lista para descargar."
+        )
+
+    if encontrado.get("paid"):
+        resultado["redirect_session_id"] = found_session_id
+        return (
+            f"Se encontro el pedido de {nombre} ('{titulo}'), YA PAGADO y en "
+            "generacion. Decile que ya encontraste su pedido, que el pago quedo "
+            "confirmado, y que en un segundo lo vas a llevar de vuelta a la pantalla "
+            "donde va a ver el progreso (tambien le llega por correo cuando este lista)."
+        )
+
+    if encontrado.get("final_lyric"):
+        # Letra ya aprobada pero sin pago confirmado - el link viejo puede
+        # haber expirado o el pago haber sido rechazado. Se genera uno
+        # fresco antes de mandarlo de vuelta, para no devolverle un link
+        # que ya no sirve.
+        precio_encontrado = get_precio_pais(encontrado.get("country"), encontrado.get("tier", "song"))
+        try:
+            await _crear_link_pago(found_session_id, encontrado, precio_encontrado)
+        except Exception:
+            log.exception(
+                "Error regenerando link de pago en recuperacion para session_id=%s",
+                found_session_id,
+            )
+            return (
+                "Se encontro el pedido pero hubo un problema tecnico generando un "
+                "nuevo link de pago. Decile al cliente que ya lo estamos revisando y "
+                "que intente de nuevo en unos minutos."
+            )
+        resultado["redirect_session_id"] = found_session_id
+        return (
+            f"Se encontro el pedido de {nombre} con la letra ya aprobada ('{titulo}') "
+            "pero sin pago confirmado (puede haber sido rechazado o el link haber "
+            "expirado) - se genero un link de pago NUEVO. Decile que ya encontraste "
+            "su pedido con la letra que ya habian armado juntos, y que en un segundo "
+            "lo vas a llevar de vuelta para que pueda pagar con el nuevo link."
+        )
+
+    # Se encontro un pedido, pero nunca se llego a aprobar una letra (se
+    # quedo a mitad de la charla) - no hay nada util que retomar de ahi.
+    return (
+        "Se encontro un pedido anterior con ese correo, pero nunca se llego a "
+        "aprobar una letra (se quedo a mitad de la charla). No hay nada que "
+        "recuperar de ahi - decile al cliente con calidez que mejor arranquen de "
+        "nuevo, y segui la charla normal para armar su cancion desde cero en este "
+        "mismo chat."
+    )
+
+
 async def handle_web_chat(session_id: str, text: str) -> dict:
     """Procesa un turno del chat web. Devuelve un dict con:
     - mensajes: lista de textos que Claude respondio en este turno (para
@@ -64,109 +245,20 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
         # frontend deberia estar usando /web/status para el resto.
         return {"mensajes": [], "listo_para_pagar": False, "payment_url": order.get("payment_url")}
 
-    resultado = {"mensajes": [], "listo_para_pagar": False, "payment_url": None}
+    resultado = {
+        "mensajes": [], "listo_para_pagar": False, "payment_url": None,
+        # Si buscar_pedido_por_correo/find_previous_order encuentra un
+        # pedido real, el frontend redirige a esta sesion en vez de seguir
+        # en la nueva - ver retomarSesion() en landing.py.
+        "redirect_session_id": None,
+    }
 
     async def ejecutar_herramienta(name: str, tool_input: dict) -> str:
-        if name != "finalizar_letra":
-            return "Herramienta desconocida."
-
-        title = tool_input.get("title", "")
-        style = tool_input.get("style", "")
-        lyric = tool_input.get("lyric", "")
-        email = (tool_input.get("email") or "").strip()
-        customer_name = (tool_input.get("customer_name") or "").strip()
-        # solo lo llena el tool schema en ingles (WEB_CONTENT_TOOLS_EN) - el
-        # de ES no tiene este campo, asi que aca siempre da None y no cambia
-        # nada del flujo en espanol.
-        vocal_gender = tool_input.get("vocal_gender")
-        if vocal_gender not in ("f", "m"):
-            vocal_gender = None
-        # misma red de seguridad que en Telegram: separar estilo pegado al
-        # inicio de la letra si Claude lo mezclo por error.
-        idx = lyric.find("[")
-        if idx > 0:
-            prefijo = lyric[:idx].strip(" \n:-")
-            if prefijo:
-                lyric = lyric[idx:].lstrip()
-                style = f"{style} {prefijo}".strip() if style else prefijo
-
-        db.save_web_final_letra(session_id, title, style, lyric, gender=vocal_gender)
-        if email and "@" in email:
-            db.update_web_order(session_id, email=email)
-        else:
-            log.warning(
-                "finalizar_letra (web) llamado sin un correo valido para session_id=%s: %r",
-                session_id, email,
-            )
-        if customer_name:
-            db.update_web_order(session_id, customer_name=customer_name)
-        else:
-            log.warning(
-                "finalizar_letra (web) llamado sin nombre para session_id=%s", session_id
-            )
-
-        order_id = f"web-{session_id}-{int(time.time())}"
-        # EE.UU. paga via PayPal (dLocal Go no puede cobrarle a alguien
-        # fisicamente en EE.UU. - ver app/paypal_client.py); el resto de
-        # paises sigue con dLocal Go, sin cambios. Ambas ramas dejan
-        # `payment` con el mismo shape {"redirect_url", "id"}.
-        es_estados_unidos = (order.get("country") or "MX") == "US"
-        descripcion = "Personalized song" if es_estados_unidos else "Canción personalizada"
-        if order.get("tier") == "song_video":
-            descripcion += " + video"
-
-        try:
-            if es_estados_unidos:
-                payment = await create_paypal_order(
-                    amount=precio["amount"],
-                    currency=precio["currency"],
-                    order_id=order_id,
-                    description=descripcion,
-                    return_url=f"{BASE_URL}/pago-exitoso/web/{session_id}",
-                    cancel_url=f"{BASE_URL}/?session_id={session_id}",
-                )
-                gateway = "paypal"
-            else:
-                payment = await create_payment(
-                    amount=precio["amount"],
-                    currency=precio["currency"],
-                    country=(order.get("country") or "MX"),
-                    order_id=order_id,
-                    description=descripcion,
-                    notification_url=f"{BASE_URL}/dlocal/webhook",
-                    # session_id va en el PATH, no en query string: algunos
-                    # gateways de pago (dLocal Go incluido) no garantizan que
-                    # preserven query params custom al armar la redireccion final
-                    # - un segmento de path es mucho mas dificil de perder o
-                    # pisar que un "?param=valor".
-                    success_url=f"{BASE_URL}/pago-exitoso/web/{session_id}",
-                )
-                gateway = "dlocal"
-        except Exception:
-            log.exception(
-                "Error creando el pago web (%s) para session_id=%s",
-                "PayPal" if es_estados_unidos else "dLocal Go", session_id,
-            )
-            return (
-                "Hubo un problema tecnico generando el link de pago. Decile al cliente "
-                "que ya lo estamos revisando y que intente de nuevo en un momento."
-            )
-
-        db.update_web_order(
-            session_id,
-            step="esperando_pago",
-            payment_url=payment["redirect_url"],
-            payment_request_id=payment["id"],
-            amount_mxn=precio["amount"],
-            gateway=gateway,
-        )
-        resultado["listo_para_pagar"] = True
-        resultado["payment_url"] = payment["redirect_url"]
-        return (
-            "Se genero el link de pago correctamente. Ya se le va a mostrar el boton de "
-            "pago en la pantalla - en tu mensaje de texto avisale con calidez que la letra "
-            "quedo lista y que puede pagar cuando quiera para arrancar la generacion."
-        )
+        if name == "finalizar_letra":
+            return await _finalizar_letra(session_id, order, precio, tool_input, resultado)
+        if name in ("buscar_pedido_por_correo", "find_previous_order"):
+            return await _buscar_pedido_por_correo(tool_input, order, resultado)
+        return "Herramienta desconocida."
 
     messages = db.get_web_messages(session_id)
     if not messages:
