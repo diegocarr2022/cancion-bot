@@ -8,8 +8,18 @@ Usa reportlab (pura Python, sin binarios externos como wkhtmltopdf) para no
 depender de que Render tenga instalado algo fuera del venv. Paleta y tono
 calcados de LANDING_HTML_EN (ver app/landing.py: --ink #16110d, --paper
 #efe4cc, --amber #e8a23a) - pensado para el flujo en ingles de Tunecraft.
+
+El titulo usa la misma tipografia que el H1 de la landing (Fraunces, ver
+`h1, h2, h3 { font-family: 'Fraunces' }` en landing.py). Fraunces es una
+fuente variable (OFL) sin instancias estaticas publicadas por Google Fonts,
+asi que app/fonts/Fraunces-Black.ttf es una instancia ESTATICA generada una
+sola vez con `fonttools varLib.instancer` fijando los ejes wght=900 (Black,
+el peso mas oscuro que carga la landing) y opsz=40 (mismo optical size que
+usa el H1 via font-variation-settings) - reportlab no soporta fuentes
+variables directamente, necesita un TTF estatico para poder embeberlo.
 """
 import io
+import os
 from xml.sax.saxutils import escape as _esc
 
 from reportlab.graphics.barcode.qr import QrCodeWidget
@@ -19,7 +29,9 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Spacer
 
 INK = colors.HexColor("#16110d")
 PAPER = colors.HexColor("#efe4cc")
@@ -28,6 +40,11 @@ INK_SOFT = colors.HexColor("#6b5c42")
 
 _HEADER_H = 0.85 * inch
 _FOOTER_H = 0.45 * inch
+
+_FONT_TITLE = "Fraunces-Black"
+pdfmetrics.registerFont(
+    TTFont(_FONT_TITLE, os.path.join(os.path.dirname(__file__), "fonts", "Fraunces-Black.ttf"))
+)
 
 
 def _draw_chrome(canvas, _doc):
@@ -83,7 +100,7 @@ def build_lyrics_pdf(title: str, style: str, lyric: str, song_url: str | None = 
     )
 
     title_style = ParagraphStyle(
-        "SongTitle", fontName="Helvetica-Bold", fontSize=22, leading=27,
+        "SongTitle", fontName=_FONT_TITLE, fontSize=26, leading=31,
         textColor=INK, alignment=TA_CENTER, spaceAfter=6,
     )
     style_style = ParagraphStyle(
@@ -92,34 +109,63 @@ def build_lyrics_pdf(title: str, style: str, lyric: str, song_url: str | None = 
     )
     tag_style = ParagraphStyle(
         "Tag", fontName="Helvetica-Bold", fontSize=10.5, leading=13,
-        textColor=AMBER, spaceBefore=14, spaceAfter=4,
+        textColor=AMBER, alignment=TA_CENTER, spaceBefore=14, spaceAfter=4,
     )
     line_style = ParagraphStyle(
         "Line", fontName="Helvetica", fontSize=11.5, leading=16,
-        textColor=INK,
+        textColor=INK, alignment=TA_CENTER,
+    )
+    repeat_style = ParagraphStyle(
+        "Repeat", fontName="Helvetica-Oblique", fontSize=11, leading=16,
+        textColor=INK_SOFT, alignment=TA_CENTER,
     )
 
     story = [Paragraph(_esc(title or "Your song"), title_style)]
     story.append(Paragraph(_esc(style), style_style) if style else Spacer(1, 18))
 
+    # Partir la letra en secciones [Tag] + cuerpo, para poder colapsar un
+    # bloque repetido (mismo Coro/Pre-Coro que ya aparecio antes, palabra por
+    # palabra) a un simple "Repeat" en vez de repetirlo completo - asi entra
+    # en una sola hoja aunque la cancion tenga el coro 2-3 veces.
+    secciones = []
+    tag_actual = None
+    cuerpo_actual = []
     for raw_line in (lyric or "").splitlines():
         line = raw_line.strip()
-        if not line:
-            story.append(Spacer(1, 6))
-            continue
         if line.startswith("[") and line.endswith("]"):
-            story.append(Paragraph(_esc(line.upper()), tag_style))
+            secciones.append((tag_actual, cuerpo_actual))
+            tag_actual = line
+            cuerpo_actual = []
         else:
-            story.append(Paragraph(_esc(line), line_style))
+            cuerpo_actual.append(line)
+    secciones.append((tag_actual, cuerpo_actual))
+
+    cuerpos_vistos = set()
+    for tag, cuerpo in secciones:
+        if tag:
+            story.append(Paragraph(_esc(tag.upper()), tag_style))
+        normalizado = "\n".join(l for l in cuerpo if l).strip().lower()
+        if tag and normalizado and normalizado in cuerpos_vistos:
+            story.append(Paragraph("Repeat", repeat_style))
+            continue
+        if normalizado:
+            cuerpos_vistos.add(normalizado)
+        for line in cuerpo:
+            if not line:
+                story.append(Spacer(1, 6))
+            else:
+                story.append(Paragraph(_esc(line), line_style))
 
     if song_url:
         qr_caption_style = ParagraphStyle(
             "QRCaption", fontName="Helvetica", fontSize=9, leading=11,
             textColor=INK_SOFT, alignment=TA_CENTER, spaceBefore=8,
         )
-        story.append(Spacer(1, 28))
-        story.append(_qr_drawing(song_url, 0.9 * inch))
-        story.append(Paragraph("Scan to play your song", qr_caption_style))
+        story.append(Spacer(1, 10))
+        story.append(KeepTogether([
+            _qr_drawing(song_url, 0.75 * inch),
+            Paragraph("Scan to play your song", qr_caption_style),
+        ]))
 
     doc.build(story, onFirstPage=_draw_chrome, onLaterPages=_draw_chrome)
     return buf.getvalue()
