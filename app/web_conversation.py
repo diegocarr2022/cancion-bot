@@ -146,10 +146,25 @@ async def _finalizar_letra(session_id: str, order: dict, precio: dict, tool_inpu
 
     resultado["listo_para_pagar"] = True
     resultado["payment_url"] = payment["redirect_url"]
+    aviso_paypal = ""
+    if (order.get("country") or "MX") == "US":
+        # PayPal a veces le pide un par de datos extra al pagar como
+        # invitado (fecha de nacimiento, etc.) aunque no tenga cuenta - ver
+        # conversacion con Diego: confirmado en vivo que SI deja pagar, pero
+        # con esa friccion. Se le pide a Claude que lo anticipe con calidez
+        # para que no sorprenda/asuste al cliente cuando llegue ahi.
+        aviso_paypal = (
+            " Tambien mencionale, de forma casual y tranquilizadora (no como una "
+            "advertencia grande), que la pantalla de PayPal puede pedirle un par de "
+            "datos extra aunque este pagando como invitado sin cuenta - es el paso "
+            "estandar de PayPal para pagos de invitado, no significa que le esten "
+            "creando una cuenta que vaya a usar."
+        )
     return (
         "Se genero el link de pago correctamente. Ya se le va a mostrar el boton de "
         "pago en la pantalla - en tu mensaje de texto avisale con calidez que la letra "
         "quedo lista y que puede pagar cuando quiera para arrancar la generacion."
+        + aviso_paypal
     )
 
 
