@@ -96,6 +96,38 @@ async def enviar_cancion_por_correo(
         return False
 
 
+async def enviar_recordatorio_resena(destinatario: str, titulo: str, review_url: str) -> bool:
+    """Respaldo para cuando el cliente no le dio clic al link de reseña de
+    Trustpilot justo en la pantalla de descarga (ver Diego: el pedido
+    principal es en el momento de la entrega, esto es solo el recordatorio
+    si no reacciono ahi). Solo existe en ingles - Trustpilot es
+    especificamente relevante para EE.UU."""
+    if not GMAIL_USER or not GMAIL_APP_PASSWORD:
+        log.warning(
+            "GMAIL_USER/GMAIL_APP_PASSWORD no configurados - se omite el "
+            "recordatorio de reseña para %s.", destinatario,
+        )
+        return False
+
+    cuerpo_html = f"""
+    <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+      <h2>💛 How did "{titulo}" turn out?</h2>
+      <p>We hope it landed exactly the way you hoped. If you have a minute, a quick review
+      means a lot to a brand-new shop like ours - it's how the next person finds us.</p>
+      <p><a href="{review_url}" style="color:#c2410c; font-weight:bold;">Leave us a review</a></p>
+      <p style="color:#6b7280; font-size:13px;">Thank you for trusting {BRAND_NAME_EN} with this gift.</p>
+    </div>
+    """
+    asunto = f"💛 How did \"{titulo}\" turn out?"
+
+    try:
+        await asyncio.to_thread(_enviar_sync, destinatario, asunto, cuerpo_html)
+        return True
+    except Exception:
+        log.exception("Error mandando el recordatorio de reseña a %s", destinatario)
+        return False
+
+
 async def enviar_video_por_correo(destinatario: str, titulo: str, video_url: str, language: str = "es") -> bool:
     """Fase 2 (upsell de video, ver app/video_client.py): correo separado del
     de la cancion porque el video puede terminar bastante despues (el render

@@ -219,6 +219,15 @@ GOOGLE_ADS_CONVERSION_LABEL = os.environ.get("GOOGLE_ADS_CONVERSION_LABEL", "")
 # se usa mientras se esta verificando que los eventos lleguen bien.
 META_CAPI_TEST_EVENT_CODE = os.environ.get("META_CAPI_TEST_EVENT_CODE", "")
 
+# --- Trustpilot (solo flujo EN/EE.UU. - ver Diego: "en EE.UU. Trustpilot es
+# muy importante") ---
+# URL publica de "escribir una reseña" del perfil de Tunecraft, formato
+# https://www.trustpilot.com/evaluate/tunecraft.studio - se consigue al crear
+# el perfil de empresa en business.trustpilot.com. No es secreto. Si esta
+# vacio, no se muestra ningun pedido de reseña ni se manda el recordatorio -
+# la entrega funciona igual sin esto configurado.
+TRUSTPILOT_REVIEW_URL = os.environ.get("TRUSTPILOT_REVIEW_URL", "")
+
 # --- PayPal (pagos en USD para EE.UU. - ver app/paypal_client.py) ---
 PAYPAL_CLIENT_ID = os.environ.get("PAYPAL_CLIENT_ID", "")
 PAYPAL_CLIENT_SECRET = os.environ.get("PAYPAL_CLIENT_SECRET", "")

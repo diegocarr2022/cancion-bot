@@ -29,10 +29,11 @@ from app.config import (
     BRAND_NAME_EN,
     GOOGLE_ADS_CONVERSION_ID,
     GOOGLE_ADS_CONVERSION_LABEL,
+    TRUSTPILOT_REVIEW_URL,
 )
 from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
-from app.email_client import enviar_cancion_por_correo
+from app.email_client import enviar_cancion_por_correo, enviar_recordatorio_resena
 from app.landing import LANDING_HTML_ES, LANDING_HTML_EN, pixel_script, google_ads_script
 from app.legal import TERMINOS_HTML, PRIVACIDAD_HTML, TERMS_HTML_EN, PRIVACY_HTML_EN
 from app.payment_confirm import confirmar_pago, confirmar_pago_web
@@ -120,10 +121,12 @@ async def startup():
     _spawn(poll_stuck_generation_loop())
     _spawn(poll_web_suno_tasks_loop())
     _spawn(poll_web_pending_payments_loop())
+    _spawn(poll_review_reminder_loop())
     log.info(
         "Loops de background arrancados: poll_suno_tasks_loop, "
         "poll_pending_payments_loop, poll_stuck_generation_loop, "
-        "poll_web_suno_tasks_loop, poll_web_pending_payments_loop"
+        "poll_web_suno_tasks_loop, poll_web_pending_payments_loop, "
+        "poll_review_reminder_loop"
     )
 
 
@@ -329,6 +332,18 @@ async def web_status(session_id: str):
         "video_status": order.get("video_status", "none"),
         "video_url": order.get("video_url"),
     }
+
+
+@app.post("/web/review-click")
+async def web_review_click(request: Request):
+    """Registra que el cliente le dio clic al link de reseña de Trustpilot
+    en la pantalla de descarga - asi poll_review_reminder_loop sabe que no
+    hace falta mandarle el correo de recordatorio despues."""
+    body = await request.json() if await request.body() else {}
+    session_id = body.get("session_id")
+    if session_id:
+        db.mark_review_link_clicked(session_id)
+    return {"ok": True}
 
 
 @app.get("/web/lyrics-pdf/{session_id}")
@@ -1263,6 +1278,35 @@ async def poll_web_pending_payments_loop():
         except Exception:
             log.exception("Error en el loop de polling de pagos web")
         await asyncio.sleep(POLL_INTERVAL_SECONDS)
+
+
+REVIEW_REMINDER_POLL_SECONDS = 3600  # cada hora alcanza sobra - no es urgente
+REVIEW_REMINDER_MIN_HOURS = 48
+
+
+async def poll_review_reminder_loop():
+    """Recordatorio de reseña de Trustpilot por correo - solo para quien NO
+    le dio clic al link en la pantalla de descarga (ver web_review_click) en
+    las primeras 48h. El pedido principal es en el momento de la entrega;
+    esto es unicamente el respaldo. No hace nada si TRUSTPILOT_REVIEW_URL no
+    esta configurado."""
+    while True:
+        try:
+            if TRUSTPILOT_REVIEW_URL:
+                pendientes = db.find_web_orders_pending_review_reminder(REVIEW_REMINDER_MIN_HOURS)
+                log.info(
+                    "[poll_review_reminder_loop] tick - %d recordatorio(s) de reseña pendiente(s)",
+                    len(pendientes),
+                )
+                for order in pendientes:
+                    enviado = await enviar_recordatorio_resena(
+                        order["email"], order.get("final_title") or "Your song", TRUSTPILOT_REVIEW_URL,
+                    )
+                    if enviado:
+                        db.update_web_order(order["session_id"], review_email_sent=1)
+        except Exception:
+            log.exception("Error en el loop de recordatorio de reseña")
+        await asyncio.sleep(REVIEW_REMINDER_POLL_SECONDS)
 
 
 async def check_web_payment_status(order: dict):

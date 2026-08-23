@@ -186,6 +186,11 @@ MIGRATIONS = [
     "ALTER TABLE web_orders ADD COLUMN utm_content TEXT",
     "ALTER TABLE web_orders ADD COLUMN utm_term TEXT",
     "ALTER TABLE web_orders ADD COLUMN gclid TEXT",
+    # Pedido de reseña de Trustpilot (ver Diego: pedirla justo al momento de
+    # la entrega, no dias despues por correo - el recordatorio por correo es
+    # solo un respaldo si no le dio clic ahi mismo).
+    "ALTER TABLE web_orders ADD COLUMN review_link_clicked INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE web_orders ADD COLUMN review_email_sent INTEGER NOT NULL DEFAULT 0",
 ]
 
 
@@ -563,6 +568,31 @@ def find_recent_web_order_by_email(email: str, language: str | None = None):
         query += " ORDER BY created_at DESC LIMIT 1"
         row = conn.execute(query, params).fetchone()
         return dict(row) if row else None
+
+
+def mark_review_link_clicked(session_id: str):
+    update_web_order(session_id, review_link_clicked=1)
+
+
+def find_web_orders_pending_review_reminder(min_hours_since_delivery: int = 48):
+    """Pedidos entregados hace mas de min_hours_since_delivery, en ingles,
+    que no le dieron clic al link de reseña en el momento de la entrega ni
+    ya se les mando el correo de recordatorio - ver Diego: el pedido
+    principal es en el momento, esto es solo el respaldo."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM web_orders
+            WHERE delivered = 1
+              AND language = 'en'
+              AND review_link_clicked = 0
+              AND review_email_sent = 0
+              AND email IS NOT NULL
+              AND datetime(updated_at) <= datetime('now', ?)
+            """,
+            (f"-{min_hours_since_delivery} hours",),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def create_web_order(

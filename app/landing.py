@@ -51,6 +51,7 @@ from app.config import (
     GA_MEASUREMENT_ID,
     GOOGLE_ADS_CONVERSION_ID,
     GOOGLE_ADS_CONVERSION_LABEL,
+    TRUSTPILOT_REVIEW_URL,
 )
 
 
@@ -119,6 +120,23 @@ gtag('js', new Date());
 
 
 _GOOGLE_ADS_SCRIPT = google_ads_script()
+
+# Pedido de reseña de Trustpilot, mostrado justo en la pantalla de descarga
+# (ver Diego: en el momento de la entrega, no dias despues por correo).
+# marcarReviewClick() registra el clic en el servidor asi el recordatorio
+# por correo (poll_review_reminder_loop en main.py) sabe que ya no hace
+# falta - target=_blank asi el fetch de registro no compite con la
+# navegacion. Vacio si no hay perfil de Trustpilot configurado todavia.
+_REVIEW_BLOCK_EN = (
+    f"""
+      <div id="review-box" style="margin-top:18px; padding-top:16px; border-top:1px solid var(--line);">
+        <p style="margin:0 0 10px; font-size:14px;">💛 Loved it? A quick review means the world to a brand-new shop like ours.</p>
+        <a href="{TRUSTPILOT_REVIEW_URL}" target="_blank" rel="noopener" id="link-review" onclick="marcarReviewClick()">Leave us a review</a>
+      </div>
+    """
+    if TRUSTPILOT_REVIEW_URL
+    else ""
+)
 
 # Reemplazado por SAMPLE_STYLES (grid de 6 generos, ago 2026) - se deja vacia
 # para no mostrar una seccion duplicada/con audios que ya no existen con
@@ -943,6 +961,7 @@ ___GOOGLE_ADS_SCRIPT___
       <p style="font-size:12px; color:var(--paper-ink-soft); margin-top:14px; margin-bottom:0;">
         We also sent it to your email as a backup.
       </p>
+      ___REVIEW_BLOCK___
     </div>
   </section>
 
@@ -1049,6 +1068,16 @@ actualizarOdometro();
 function leerCookie(nombre) {
   const match = document.cookie.match(new RegExp("(?:^|; )" + nombre + "=([^;]*)"));
   return match ? decodeURIComponent(match[1]) : null;
+}
+
+function marcarReviewClick() {
+  // Fire-and-forget: no bloquea el target=_blank que ya esta abriendo
+  // Trustpilot. Si esto falla (red, etc.) no pasa nada grave - el
+  // recordatorio por correo es el respaldo para ese caso.
+  fetch("/web/review-click", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({session_id: sessionId}),
+  }).catch(() => {});
 }
 
 function agregarMensaje(texto, quien) {
@@ -1203,6 +1232,7 @@ iniciar();
 
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___META_PIXEL_SCRIPT___", _META_PIXEL_SCRIPT_EN)
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___GOOGLE_ADS_SCRIPT___", _GOOGLE_ADS_SCRIPT)
+LANDING_HTML_EN = LANDING_HTML_EN.replace("___REVIEW_BLOCK___", _REVIEW_BLOCK_EN)
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___JSON_LD___", _JSON_LD_EN)
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___CANONICAL_URL___", f"{BASE_URL}/")
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___LAUNCH_PRICE_ENDS_AT_ISO___", LAUNCH_PRICE_ENDS_AT)
