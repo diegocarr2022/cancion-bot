@@ -44,7 +44,7 @@ from app.paypal_client import (
 )
 from app.suno_client import get_task_status, generate_custom_song, extract_ready_items
 from app.telegram_client import send_document_by_url, send_message, set_webhook, get_me
-from app.web_conversation import handle_web_chat
+from app.web_conversation import handle_web_chat, crear_link_pago
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("cancion-bot")
@@ -383,6 +383,30 @@ async def pago_exitoso_web(session_id: str):
             order = db.get_web_order(session_id) or order
         except Exception:
             log.exception("Error capturando la orden de PayPal para session_id=%s", session_id)
+            # El link de pago que tenia este pedido probablemente ya quedo
+            # muerto (una orden de PayPal no se puede volver a capturar
+            # despues de un fallo en la mayoria de los casos) - se genera uno
+            # NUEVO de una vez, para que el cliente vea un boton que SI
+            # funciona al volver a la pantalla, sin tener que chatear para
+            # pedir ayuda. Ver Diego: "necesita el bot saber si el pago fue
+            # rechazado" - este caso (fallo en el capture, que vemos nosotros
+            # mismos en el momento) no necesita esperar al bot ni a un
+            # webhook, se resuelve aca directo.
+            try:
+                precio = get_precio_pais(order.get("country"), order.get("tier", "song"))
+                await crear_link_pago(session_id, order, precio)
+                order = db.get_web_order(session_id) or order
+                await send_message(
+                    ADMIN_CHAT_ID,
+                    f"⚠️ Falló el cobro de PayPal para session_id={session_id} "
+                    f"(pago aprobado pero el capture fue rechazado). Se genero un link "
+                    f"de pago nuevo automaticamente.",
+                )
+            except Exception:
+                log.exception(
+                    "Tambien fallo la regeneracion del link de pago para session_id=%s",
+                    session_id,
+                )
 
     # Evento "Purchase" del Pixel de Meta (lado del navegador) - se dispara
     # en cuanto el cliente aterriza aca de vuelta desde la pasarela, que solo

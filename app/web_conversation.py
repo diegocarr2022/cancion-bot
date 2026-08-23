@@ -43,7 +43,7 @@ KICKOFF_TEXT_EN = (
 )
 
 
-async def _crear_link_pago(session_id: str, order: dict, precio: dict) -> dict:
+async def crear_link_pago(session_id: str, order: dict, precio: dict) -> dict:
     """Crea (o re-crea) el link de pago de un pedido web con letra ya
     aprobada. Separado de _finalizar_letra para poder reutilizarlo desde
     _buscar_pedido_por_correo: si se recupera un pedido sin pagar, el link
@@ -134,7 +134,7 @@ async def _finalizar_letra(session_id: str, order: dict, precio: dict, tool_inpu
         )
 
     try:
-        payment = await _crear_link_pago(session_id, order, precio)
+        payment = await crear_link_pago(session_id, order, precio)
     except Exception:
         log.exception(
             "Error creando el pago web para session_id=%s", session_id,
@@ -193,7 +193,7 @@ async def _buscar_pedido_por_correo(tool_input: dict, order: dict, resultado: di
         # que ya no sirve.
         precio_encontrado = get_precio_pais(encontrado.get("country"), encontrado.get("tier", "song"))
         try:
-            await _crear_link_pago(found_session_id, encontrado, precio_encontrado)
+            await crear_link_pago(found_session_id, encontrado, precio_encontrado)
         except Exception:
             log.exception(
                 "Error regenerando link de pago en recuperacion para session_id=%s",
