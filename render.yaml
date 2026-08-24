@@ -37,7 +37,7 @@ services:
       - key: DLOCAL_SECRET_KEY
         sync: false
       - key: DLOCAL_ENV
-        value: "sandbox"
+        sync: false
       - key: PRECIO_MXN
         value: "197"
       - key: PRECIO_TEXTO
@@ -71,7 +71,7 @@ services:
       - key: PAYPAL_WEBHOOK_ID
         sync: false
       - key: PAYPAL_ENV
-        value: "sandbox"
+        sync: false
       - key: PRECIO_USD_SONG
         value: "27"
       - key: PRECIO_TEXTO_USD_SONG
