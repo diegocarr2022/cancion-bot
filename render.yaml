@@ -39,9 +39,9 @@ services:
       - key: DLOCAL_ENV
         sync: false
       - key: PRECIO_MXN
-        value: "197"
+        sync: false
       - key: PRECIO_TEXTO
-        value: "$197 MXN"
+        sync: false
       - key: DB_PATH
         value: "/data/orders.db"
       - key: POLL_INTERVAL_SECONDS
@@ -73,20 +73,20 @@ services:
       - key: PAYPAL_ENV
         sync: false
       - key: PRECIO_USD_SONG
-        value: "27"
+        sync: false
       - key: PRECIO_TEXTO_USD_SONG
-        value: "$27 USD"
+        sync: false
       - key: PRECIO_USD_VIDEO
-        value: "49"
+        sync: false
       - key: PRECIO_TEXTO_USD_VIDEO
-        value: "$49 USD"
+        sync: false
       - key: LAUNCH_PRICE_ENDS_AT
-        value: "2026-08-30T23:59:59+00:00"
+        sync: false
       - key: PRECIO_USD_SONG_REGULAR
-        value: "39.90"
+        sync: false
       - key: PRECIO_TEXTO_USD_SONG_REGULAR
-        value: "$39.90 USD"
+        sync: false
       - key: ENABLE_VIDEO_TIER
-        value: "false"
+        sync: false
       - key: MEDIA_DIR
         value: "/data/media"
