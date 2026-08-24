@@ -8,7 +8,7 @@ import uuid
 import re
 from datetime import datetime
 
-from fastapi import FastAPI, Request, Header, HTTPException, Depends
+from fastapi import FastAPI, Request, Header, HTTPException, Depends, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
@@ -921,12 +921,30 @@ async def admin_orden_telegram(chat_id: int, _: bool = Depends(_verificar_admin)
           <div style="white-space:pre-wrap; font-size:14px; line-height:1.6; margin-top:10px;">{letra or '<span style="color:#9ca3af;">Sin letra aprobada todavía.</span>'}</div>
         </div>
         <div class="card">
+          <h2>Mandar mensaje manual</h2>
+          <p style="font-size:13px; color:#6b7280;">Se manda directo por el bot a este chat_id - no hace falta que el cliente escriba primero.</p>
+          <form method="post" action="/admin/orden/telegram/{chat_id}/mensaje">
+            <textarea name="texto" rows="4" style="width:100%; box-sizing:border-box; font-family:inherit; font-size:14px; padding:8px;" placeholder="Escribe el mensaje..."></textarea>
+            <button type="submit" style="margin-top:8px; padding:8px 16px; background:#c2410c; color:#fff; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Enviar</button>
+          </form>
+        </div>
+        <div class="card">
           <h2>Conversación completa</h2>
           {transcripcion}
         </div>
       </body>
     </html>
     """
+
+
+@app.post("/admin/orden/telegram/{chat_id}/mensaje")
+async def admin_enviar_mensaje_telegram(
+    chat_id: int, texto: str = Form(...), _: bool = Depends(_verificar_admin)
+):
+    texto = texto.strip()
+    if texto:
+        await send_message(chat_id, texto)
+    return RedirectResponse(url=f"/admin/orden/telegram/{chat_id}", status_code=303)
 
 
 # ---------------------------------------------------------------------------
