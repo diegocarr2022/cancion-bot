@@ -186,15 +186,14 @@ async def ir_a_telegram(source: str, request: Request):
 # instalar ninguna app. Ver app/landing.py y app/web_conversation.py.
 # ---------------------------------------------------------------------------
 @app.get("/cancion", response_class=HTMLResponse)
-async def cancion_landing(request: Request, lang: str | None = None):
+async def cancion_landing(lang: str | None = None):
     # ?lang=en/es en el link del anuncio decide el idioma - mismo mecanismo
     # que ?source=/?country= (ver iniciar() en landing.py). Sin el parametro,
-    # se usa el Accept-Language del navegador como respaldo (trafico organico
-    # o directo que no viene de un anuncio con el parametro armado).
+    # /cancion es la URL historica en espanol (Telegram, enlaces viejos) -
+    # default a ES, sin adivinar por Accept-Language (ese respaldo causaba
+    # que navegadores en ingles vieran EN incluso entrando a /cancion sin
+    # parametro - mismo bug que ya se habia corregido en la raiz "/").
     resolved_lang = (lang or "").strip().lower()
-    if resolved_lang not in ("es", "en"):
-        accept_lang = request.headers.get("accept-language", "").lower()
-        resolved_lang = "en" if accept_lang.startswith("en") else "es"
     return LANDING_HTML_EN if resolved_lang == "en" else LANDING_HTML_ES
 
 
