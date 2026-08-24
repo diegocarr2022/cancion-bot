@@ -943,7 +943,7 @@ ___GOOGLE_ADS_SCRIPT___
 
     <div class="player" id="pago-box">
       <p style="margin-top:0;">✅ Your lyrics are ready! Once you pay, we start recording.</p>
-      <a id="link-pago" href="#">Pay $27 &amp; Create My Song</a>
+      <a id="link-pago" href="#" onclick="if(window.gtag){gtag('event','begin_checkout',{value:27,currency:'USD'});}">Pay $27 &amp; Create My Song</a>
       <p style="font-size:12px; color:var(--paper-ink-soft); margin-top:14px; margin-bottom:0;">
         You'll come right back here once payment goes through.
       </p>
