@@ -5,6 +5,7 @@ import resource
 import secrets
 import uuid
 
+import httpx
 import re
 from datetime import datetime
 
@@ -1363,6 +1364,23 @@ async def check_web_payment_status(order: dict):
 
         payment = await get_payment(order["payment_request_id"])
         db.touch_last_checked_web(order["session_id"], datetime.utcnow().isoformat())
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            # La orden ya no existe del lado del gateway (tipicamente una
+            # orden de PayPal no aprobada que expiro sola, ~3h despues de
+            # creada) - no tiene caso seguir reintentando hasta las 48h del
+            # corte general, se marca fallida de una vez. Si el cliente
+            # regresa, la herramienta de recuperacion le genera una orden
+            # nueva (ver _buscar_pedido_por_correo en web_conversation.py).
+            db.update_web_order(order["session_id"], step="pago_fallido")
+            log.info(
+                "Orden de pago no encontrada (404) para session_id=%s - "
+                "probablemente expiro sin aprobarse. Se marca como fallida.",
+                order["session_id"],
+            )
+        else:
+            log.exception("Error consultando pago web pendiente para session_id=%s", order["session_id"])
+        return
     except Exception:
         log.exception("Error consultando pago web pendiente para session_id=%s", order["session_id"])
         return
