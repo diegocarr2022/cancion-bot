@@ -868,6 +868,7 @@ async def admin_orden_web(session_id: str, _: bool = Depends(_verificar_admin)):
           <p><strong>Correo:</strong> {html.escape(order.get('email') or '—')}</p>
           <p><strong>País / idioma:</strong> {html.escape(order.get('country') or '—')} · {html.escape(order.get('language') or 'es')}</p>
           <p><strong>Pasarela:</strong> {html.escape(order.get('gateway') or '—')}</p>
+          <p><strong>ID de orden de pago:</strong> {html.escape(order.get('payment_request_id') or '—')}</p>
           <p><strong>Estado:</strong> {html.escape(order.get('step') or '—')} · pagado: {'sí' if order.get('paid') else 'no'} · entregado: {'sí' if order.get('delivered') else 'no'}</p>
           <p><strong>Creado:</strong> {(order.get('created_at') or '')[:16].replace('T', ' ')}</p>
         </div>
