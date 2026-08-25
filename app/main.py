@@ -1328,6 +1328,12 @@ async def poll_review_reminder_loop():
         await asyncio.sleep(REVIEW_REMINDER_POLL_SECONDS)
 
 
+# PayPal invalida sola una orden no aprobada unas horas despues de creada -
+# le damos el mismo margen antes de marcarla fallida por un 404 (en vez de
+# esperar el corte general de PENDING_PAYMENT_MAX_HORAS).
+PAYPAL_ORDER_NOT_FOUND_GRACIA_HORAS = 3
+
+
 async def check_web_payment_status(order: dict):
     # Mismo corte que en Telegram (ver check_payment_status) - evita
     # reconsultar para siempre un checkout que el cliente abrio y abandono.
@@ -1366,18 +1372,27 @@ async def check_web_payment_status(order: dict):
         db.touch_last_checked_web(order["session_id"], datetime.utcnow().isoformat())
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
-            # La orden ya no existe del lado del gateway (tipicamente una
-            # orden de PayPal no aprobada que expiro sola, ~3h despues de
-            # creada) - no tiene caso seguir reintentando hasta las 48h del
-            # corte general, se marca fallida de una vez. Si el cliente
-            # regresa, la herramienta de recuperacion le genera una orden
-            # nueva (ver _buscar_pedido_por_correo en web_conversation.py).
-            db.update_web_order(order["session_id"], step="pago_fallido")
-            log.info(
-                "Orden de pago no encontrada (404) para session_id=%s - "
-                "probablemente expiro sin aprobarse. Se marca como fallida.",
-                order["session_id"],
-            )
+            # La orden ya no existe del lado del gateway - tipicamente una
+            # orden de PayPal no aprobada que expira sola unas horas despues
+            # de creada. Le damos el mismo margen que PayPal antes de darla
+            # por fallida (en vez del corte general de 48h) - un 404
+            # temprano podria ser un hipo pasajero, no necesariamente que ya
+            # expiro. Si el cliente regresa, la herramienta de recuperacion
+            # le genera una orden nueva (ver _buscar_pedido_por_correo en
+            # web_conversation.py).
+            if _horas_desde(order["created_at"]) > PAYPAL_ORDER_NOT_FOUND_GRACIA_HORAS:
+                db.update_web_order(order["session_id"], step="pago_fallido")
+                log.info(
+                    "Orden de pago no encontrada (404) para session_id=%s tras "
+                    "%sh - probablemente expiro sin aprobarse. Se marca como fallida.",
+                    order["session_id"], PAYPAL_ORDER_NOT_FOUND_GRACIA_HORAS,
+                )
+            else:
+                log.info(
+                    "Orden de pago no encontrada (404) para session_id=%s, todavia "
+                    "dentro del margen de %sh - se sigue reintentando.",
+                    order["session_id"], PAYPAL_ORDER_NOT_FOUND_GRACIA_HORAS,
+                )
         else:
             log.exception("Error consultando pago web pendiente para session_id=%s", order["session_id"])
         return
