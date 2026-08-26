@@ -53,7 +53,31 @@ from app.config import (
     GOOGLE_ADS_CONVERSION_LABEL,
     TRUSTPILOT_REVIEW_URL,
     STRIPE_API_KEY,
+    PRECIO_USD_SONG_REGULAR,
+    get_precio_pais,
 )
+
+# Precios mostrados en LANDING_HTML_EN (badge, boton de pago, FAQ, JSON-LD).
+# ago 2026: hasta ahora estos numeros estaban escritos a mano en el HTML de
+# abajo, sin conexion real con PRECIO_USD_SONG/PRECIO_TEXTO_USD_SONG - un
+# cambio de precio en Render (ej. para una prueba real en modo live con un
+# monto chico) cambiaba lo que Stripe cobraba de verdad pero la pagina
+# seguia mostrando el numero viejo. Se resuelve una sola vez, al importar
+# el modulo (igual que el resto de esta pagina) - ver la nota sobre
+# LAUNCH_PRICE_ENDS_AT mas abajo para la misma limitacion ya aceptada.
+_precio_us_song = get_precio_pais("US", "song")
+
+
+def _price_badge(amount: float) -> str:
+    """Formato corto para badges/boton/FAQ (ej. '$27', '$1', '$39.90') -
+    distinto del "texto" completo de config.py (ej. '$27 USD'), que se usa
+    en el prompt del chat/IA, no en esta pagina."""
+    return f"${amount:.0f}" if amount == int(amount) else f"${amount:.2f}"
+
+
+_PRECIO_BADGE_EN = _price_badge(_precio_us_song["amount"])
+_PRECIO_BADGE_WAS_EN = _price_badge(PRECIO_USD_SONG_REGULAR)
+_PRECIO_AMOUNT_JSONLD_EN = f'{_precio_us_song["amount"]:.2f}'
 
 
 def pixel_script(track_calls: str, noscript_ev: str = "PageView") -> str:
@@ -627,7 +651,7 @@ _JSON_LD_EN = f"""
   "brand": {{"@type": "Brand", "name": "{BRAND_NAME_EN}"}},
   "offers": {{
     "@type": "Offer",
-    "price": "27.00",
+    "price": "{_PRECIO_AMOUNT_JSONLD_EN}",
     "priceCurrency": "USD",
     "availability": "https://schema.org/InStock",
     "url": "{BASE_URL}/"
@@ -643,7 +667,7 @@ _JSON_LD_EN = f"""
     {{"@type": "Question", "name": "How fast will it actually arrive?", "acceptedAnswer": {{"@type": "Answer", "text": "Usually within a few minutes of paying. It shows up right on this page, plus a backup copy by email."}}}},
     {{"@type": "Question", "name": "Is it really one-of-a-kind?", "acceptedAnswer": {{"@type": "Answer", "text": "Yes - every song is written from scratch, based on your story. No templates, no stock lyrics, no reused lines."}}}},
     {{"@type": "Question", "name": "Is this AI-generated?", "acceptedAnswer": {{"@type": "Answer", "text": "Yes - the music and vocals are composed by AI from the story you give us, and you approve the lyrics before anything is produced."}}}},
-    {{"@type": "Question", "name": "What does it cost?", "acceptedAnswer": {{"@type": "Answer", "text": "$27, flat, for a limited launch window. You only pay once you've approved the lyrics - nothing before that."}}}}
+    {{"@type": "Question", "name": "What does it cost?", "acceptedAnswer": {{"@type": "Answer", "text": "{_PRECIO_BADGE_EN}, flat, for a limited launch window. You only pay once you've approved the lyrics - nothing before that."}}}}
   ]
 }}
 </script>
@@ -688,10 +712,10 @@ LANDING_HTML_EN = """<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Unique Personalized Song Gift | ___BRAND___</title>
-<meta name="description" content="Give the unique gift that's never existed before: a real, sung song written from your story. Approve the lyrics before you pay. $27 launch price, ready in minutes.">
+<meta name="description" content="Give the unique gift that's never existed before: a real, sung song written from your story. Approve the lyrics before you pay. ___PRECIO_BADGE___ launch price, ready in minutes.">
 <link rel="canonical" href="___CANONICAL_URL___">
 <meta property="og:title" content="___BRAND___ - The Unique Gift That's Never Existed Until Now">
-<meta property="og:description" content="A real, sung song written from your story. Approve the lyrics before you pay. $27 launch price.">
+<meta property="og:description" content="A real, sung song written from your story. Approve the lyrics before you pay. ___PRECIO_BADGE___ launch price.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="___CANONICAL_URL___">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -878,8 +902,8 @@ ___GOOGLE_ADS_SCRIPT___
     <p class="sub">The most unique gift you'll ever give - a real song written and sung from your story. You approve every lyric before you pay a cent.</p>
 
     <div class="price-row">
-      <span class="price-was">$39.90</span>
-      <span class="price-now">$27</span>
+      <span class="price-was">___PRECIO_BADGE_WAS___</span>
+      <span class="price-now">___PRECIO_BADGE___</span>
       <span class="price-label">launch price</span>
     </div>
 
@@ -950,7 +974,7 @@ ___GOOGLE_ADS_SCRIPT___
     <div class="player" id="pago-box">
       <p style="margin-top:0;">✅ Your lyrics are ready! Pay below to start recording - no need to leave this page.</p>
       <div id="stripe-payment-element"><span class="spinner"></span>Setting up your payment...</div>
-      <button id="btn-pagar" type="button">Pay $27 &amp; Create My Song</button>
+      <button id="btn-pagar" type="button">Pay ___PRECIO_BADGE___ &amp; Create My Song</button>
       <p id="stripe-error"></p>
     </div>
 
@@ -1030,7 +1054,7 @@ ___GOOGLE_ADS_SCRIPT___
     <div class="note"><p class="note-q">How fast will it actually arrive?</p><p class="note-a">Usually within a few minutes of paying. It shows up right on this page, plus a backup copy by email.</p></div>
     <div class="note"><p class="note-q">Is it really one-of-a-kind?</p><p class="note-a">Yes — every song is written from scratch, based on your story. No templates, no stock lyrics, no reused lines.</p></div>
     <div class="note"><p class="note-q">Is this AI-generated?</p><p class="note-a">Yes — the music and vocals are composed by AI from the story you give us, and you write the details together with our writer in the chat. You approve the lyrics before anything is produced. It's surprisingly good at capturing a real story - that's the whole idea.</p></div>
-    <div class="note"><p class="note-q">What does it cost?</p><p class="note-a">$27 for a limited launch window (see the price above). You only pay once you've approved the lyrics.</p></div>
+    <div class="note"><p class="note-q">What does it cost?</p><p class="note-a">___PRECIO_BADGE___ for a limited launch window (see the price above). You only pay once you've approved the lyrics.</p></div>
   </section>
 
   <footer>
@@ -1078,7 +1102,7 @@ async function confirmarPagoStripe() {
     errBox.textContent = error.message || "Something went wrong - please try again.";
     errBox.style.display = "block";
     btn.disabled = false;
-    btn.textContent = "Pay $27 & Create My Song";
+    btn.textContent = "Pay ___PRECIO_BADGE___ & Create My Song";
     return;
   }
   // El pago quedo aprobado del lado del navegador, pero la confirmacion REAL
@@ -1291,3 +1315,5 @@ LANDING_HTML_EN = LANDING_HTML_EN.replace("___CANONICAL_URL___", f"{BASE_URL}/")
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___LAUNCH_PRICE_ENDS_AT_ISO___", LAUNCH_PRICE_ENDS_AT)
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___BRAND___", BRAND_NAME_EN)
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___STRIPE_PUBLISHABLE_KEY___", STRIPE_API_KEY)
+LANDING_HTML_EN = LANDING_HTML_EN.replace("___PRECIO_BADGE_WAS___", _PRECIO_BADGE_WAS_EN)
+LANDING_HTML_EN = LANDING_HTML_EN.replace("___PRECIO_BADGE___", _PRECIO_BADGE_EN)
