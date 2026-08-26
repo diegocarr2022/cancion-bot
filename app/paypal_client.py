@@ -1,12 +1,14 @@
 """
-Cliente para PayPal (pagos EE.UU./USD, en paralelo a dLocal Go para
-MX/PE/CO - ver app/dlocal_client.py). Mismo patron que dlocal_client.py:
+Cliente para PayPal (pagos EE.UU./USD). Mismo patron que dlocal_client.py:
 httpx crudo (sin SDK), sandbox/live por env var, y la notificacion del
 webhook dispara una consulta a la API real antes de confiar en el estado.
 
-Se eligio PayPal en vez de Stripe porque encaja mejor con este patron
-(REST puro, sin necesitar un SDK) y por preferencia explicita de Diego
-(mala experiencia previa con Stripe: mas rechazos y aprobacion mas lenta).
+ACTUALIZACION (ago 2026): Stripe (app/stripe_client.py) reemplazo a PayPal
+como pasarela para pedidos NUEVOS en el flujo EN/US - la redireccion
+completa de PayPal (y el paso extra de "abre una cuenta y paga ahora" en su
+checkout de invitado) resulto ser friccion real con trafico pagado en vivo.
+Este archivo se queda intacto y sigue en uso solo para pedidos viejos que ya
+hayan quedado con gateway=="paypal" pendientes en la base de datos.
 
 Flujo (a diferencia de dLocal Go, que confirma el pago solo con el webhook):
 1. create_order() -> se redirige al cliente al link de aprobacion de PayPal.

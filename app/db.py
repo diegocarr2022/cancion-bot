@@ -191,6 +191,10 @@ MIGRATIONS = [
     # solo un respaldo si no le dio clic ahi mismo).
     "ALTER TABLE web_orders ADD COLUMN review_link_clicked INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE web_orders ADD COLUMN review_email_sent INTEGER NOT NULL DEFAULT 0",
+    # Stripe (reemplaza a PayPal en el flujo EN) es checkout embebido, sin
+    # redireccion - no hay "payment_url" que guardar, en su lugar se guarda
+    # el client_secret que el frontend usa para montar el Payment Element.
+    "ALTER TABLE web_orders ADD COLUMN stripe_client_secret TEXT",
 ]
 
 

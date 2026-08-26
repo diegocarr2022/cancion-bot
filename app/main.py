@@ -31,6 +31,7 @@ from app.config import (
     GOOGLE_ADS_CONVERSION_ID,
     GOOGLE_ADS_CONVERSION_LABEL,
     TRUSTPILOT_REVIEW_URL,
+    STRIPE_WEBHOOK_SECRET,
 )
 from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
@@ -44,6 +45,7 @@ from app.paypal_client import (
     get_order as paypal_get_order,
     verify_webhook_signature as paypal_verify_webhook_signature,
 )
+from app.stripe_client import verify_webhook_signature as stripe_verify_webhook_signature
 from app.suno_client import get_task_status, generate_custom_song, extract_ready_items
 from app.telegram_client import send_document_by_url, send_message, set_webhook, get_me
 from app.web_conversation import handle_web_chat, crear_link_pago
@@ -321,6 +323,8 @@ async def web_status(session_id: str):
         "delivered": bool(order["delivered"]),
         "audio_urls": audio_urls,
         "payment_url": order.get("payment_url"),
+        "stripe_client_secret": order.get("stripe_client_secret"),
+        "gateway": order.get("gateway"),
         "final_title": order.get("final_title"),
         # tier/video_status/video_url: usados por el frontend en ingles para
         # saber si tiene que mostrar el widget de subida de fotos y, mas
@@ -1057,6 +1061,33 @@ async def paypal_webhook(request: Request):
         if not session_id and resource.get("purchase_units"):
             session_id = resource["purchase_units"][0].get("custom_id") or resource["purchase_units"][0].get("reference_id")
 
+        if session_id:
+            order = db.get_web_order(session_id)
+            if order and not order["paid"]:
+                await confirmar_pago_web(session_id)
+
+    return {"ok": True}
+
+
+@app.post("/stripe/webhook")
+async def stripe_webhook(request: Request, stripe_signature: str = Header(default="")):
+    # Stripe firma con HMAC-SHA256 local (a diferencia de PayPal, que exige
+    # llamar a su propia API) - ver stripe_client.verify_webhook_signature.
+    # Necesita el cuerpo CRUDO sin parsear (la firma se calcula sobre esos
+    # bytes exactos), por eso se lee con request.body() y no request.json().
+    raw_body = await request.body()
+    event = stripe_verify_webhook_signature(raw_body, stripe_signature, STRIPE_WEBHOOK_SECRET)
+
+    if event is None:
+        log.warning("Firma invalida en webhook de Stripe")
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    event_type = event.get("type")
+    log.info("Stripe webhook event_type=%s", event_type)
+
+    if event_type == "payment_intent.succeeded":
+        payment_intent = (event.get("data") or {}).get("object") or {}
+        session_id = (payment_intent.get("metadata") or {}).get("session_id")
         if session_id:
             order = db.get_web_order(session_id)
             if order and not order["paid"]:

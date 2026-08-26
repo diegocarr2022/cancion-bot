@@ -22,7 +22,7 @@ from app.claude_client import (
 )
 from app.config import BASE_URL, get_precio_pais
 from app.dlocal_client import create_payment
-from app.paypal_client import create_order as create_paypal_order
+from app.stripe_client import create_payment_intent
 
 log = logging.getLogger("cancion-bot")
 
@@ -60,15 +60,16 @@ async def crear_link_pago(session_id: str, order: dict, precio: dict) -> dict:
         descripcion += " + video"
 
     if es_estados_unidos:
-        payment = await create_paypal_order(
+        # Stripe reemplaza a PayPal aca (checkout embebido, sin redireccion -
+        # ver app/stripe_client.py). PayPal se queda en el codigo solo para
+        # pedidos viejos que ya hayan quedado con gateway=="paypal".
+        payment = await create_payment_intent(
             amount=precio["amount"],
             currency=precio["currency"],
-            order_id=order_id,
+            session_id=session_id,
             description=descripcion,
-            return_url=f"{BASE_URL}/pago-exitoso/web/{session_id}",
-            cancel_url=f"{BASE_URL}/?session_id={session_id}",
         )
-        gateway = "paypal"
+        gateway = "stripe"
     else:
         payment = await create_payment(
             amount=precio["amount"],
@@ -89,7 +90,8 @@ async def crear_link_pago(session_id: str, order: dict, precio: dict) -> dict:
     db.update_web_order(
         session_id,
         step="esperando_pago",
-        payment_url=payment["redirect_url"],
+        payment_url=payment.get("redirect_url"),
+        stripe_client_secret=payment.get("client_secret"),
         payment_request_id=payment["id"],
         amount_mxn=precio["amount"],
         gateway=gateway,
@@ -145,26 +147,13 @@ async def _finalizar_letra(session_id: str, order: dict, precio: dict, tool_inpu
         )
 
     resultado["listo_para_pagar"] = True
-    resultado["payment_url"] = payment["redirect_url"]
-    aviso_paypal = ""
-    if (order.get("country") or "MX") == "US":
-        # PayPal a veces le pide un par de datos extra al pagar como
-        # invitado (fecha de nacimiento, etc.) aunque no tenga cuenta - ver
-        # conversacion con Diego: confirmado en vivo que SI deja pagar, pero
-        # con esa friccion. Se le pide a Claude que lo anticipe con calidez
-        # para que no sorprenda/asuste al cliente cuando llegue ahi.
-        aviso_paypal = (
-            " Tambien mencionale, de forma casual y tranquilizadora (no como una "
-            "advertencia grande), que la pantalla de PayPal puede pedirle un par de "
-            "datos extra aunque este pagando como invitado sin cuenta - es el paso "
-            "estandar de PayPal para pagos de invitado, no significa que le esten "
-            "creando una cuenta que vaya a usar."
-        )
+    resultado["payment_url"] = payment.get("redirect_url")
+    resultado["stripe_client_secret"] = payment.get("client_secret")
     return (
-        "Se genero el link de pago correctamente. Ya se le va a mostrar el boton de "
-        "pago en la pantalla - en tu mensaje de texto avisale con calidez que la letra "
-        "quedo lista y que puede pagar cuando quiera para arrancar la generacion."
-        + aviso_paypal
+        "Se genero el link de pago correctamente. Ya se le va a mostrar el formulario de "
+        "pago en la misma pantalla (sin salir de la pagina) - en tu mensaje de texto "
+        "avisale con calidez que la letra quedo lista y que puede pagar cuando quiera "
+        "para arrancar la generacion."
     )
 
 
@@ -258,10 +247,17 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
         # Ya paso de la etapa de charla (esta esperando pago, generando, o
         # entregado) - no hay mas turnos de Claude que procesar aca. El
         # frontend deberia estar usando /web/status para el resto.
-        return {"mensajes": [], "listo_para_pagar": False, "payment_url": order.get("payment_url")}
+        return {
+            "mensajes": [], "listo_para_pagar": False,
+            "payment_url": order.get("payment_url"),
+            "stripe_client_secret": order.get("stripe_client_secret"),
+        }
 
     resultado = {
         "mensajes": [], "listo_para_pagar": False, "payment_url": None,
+        # client_secret del Payment Element de Stripe (flujo EN) - None para
+        # el flujo ES/dLocal, que sigue usando payment_url con redireccion.
+        "stripe_client_secret": None,
         # Si buscar_pedido_por_correo/find_previous_order encuentra un
         # pedido real, el frontend redirige a esta sesion en vez de seguir
         # en la nueva - ver retomarSesion() en landing.py.

@@ -1,6 +1,9 @@
+import logging
 import os
 from datetime import datetime, timezone
 from dotenv import load_dotenv
+
+log = logging.getLogger("cancion-bot")
 
 load_dotenv()
 
@@ -240,6 +243,32 @@ PAYPAL_ENV = os.environ.get("PAYPAL_ENV", "sandbox")
 PAYPAL_BASE_URL = (
     "https://api-m.paypal.com" if PAYPAL_ENV == "live" else "https://api-m.sandbox.paypal.com"
 )
+
+# --- Stripe (pagos en USD para EE.UU. - reemplaza a PayPal, ver
+# app/stripe_client.py) - checkout EMBEBIDO en la misma landing, sin
+# redireccion, a diferencia de PayPal. Nombres de variable elegidos por Diego
+# al crearlas en Render, se respetan tal cual (no renombrar).
+STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")  # publishable key (pk_...), no es secreta, va al navegador
+STRIPE_SECRET = os.environ.get("STRIPE_SECRET", "")  # secret key (sk_...), servidor unicamente
+STRIPE_ENVIROMENT = os.environ.get("STRIPE_ENVIROMENT", "SANDBOX").strip().upper()
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+
+# A diferencia de PAYPAL_ENV/DLOCAL_ENV, Stripe no necesita esta variable
+# para funcionar - el tipo de clave (sk_test_ vs sk_live_) ya determina el
+# modo. Se usa solo como chequeo de seguridad extra: si no coincide con el
+# ambiente declarado, es exactamente el mismo tipo de mezcla que causo el
+# problema de PAYPAL_ENV/DLOCAL_ENV mas temprano hoy (env pisado sin que las
+# credenciales coincidieran) - mejor detectarlo temprano en el log que
+# descubrirlo con un cliente real atorado.
+if STRIPE_SECRET:
+    _es_live_key = STRIPE_SECRET.startswith("sk_live_")
+    _deberia_ser_live = STRIPE_ENVIROMENT == "LIVE"
+    if _es_live_key != _deberia_ser_live:
+        log.warning(
+            "STRIPE_ENVIROMENT=%s pero STRIPE_SECRET %s de tipo live (%s...) - "
+            "revisa que ambas variables correspondan al mismo ambiente.",
+            STRIPE_ENVIROMENT, "SI es" if _es_live_key else "NO es", STRIPE_SECRET[:12],
+        )
 
 # --- Marca (ago 2026) ---
 # Nombre de marca para el lado en ingles/EE.UU. (dominio tunecraft.studio) -

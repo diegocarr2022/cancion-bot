@@ -72,6 +72,14 @@ services:
         sync: false
       - key: PAYPAL_ENV
         sync: false
+      - key: STRIPE_API_KEY
+        sync: false
+      - key: STRIPE_SECRET
+        sync: false
+      - key: STRIPE_ENVIROMENT
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
       - key: PRECIO_USD_SONG
         sync: false
       - key: PRECIO_TEXTO_USD_SONG

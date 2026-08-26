@@ -52,6 +52,7 @@ from app.config import (
     GOOGLE_ADS_CONVERSION_ID,
     GOOGLE_ADS_CONVERSION_LABEL,
     TRUSTPILOT_REVIEW_URL,
+    STRIPE_API_KEY,
 )
 
 
@@ -699,6 +700,7 @@ LANDING_HTML_EN = """<!DOCTYPE html>
 ___JSON_LD___
 ___META_PIXEL_SCRIPT___
 ___GOOGLE_ADS_SCRIPT___
+<script src="https://js.stripe.com/v3/"></script>
 <style>
   :root {
     --ink: #16110d; --ink-raised: #1e1710; --paper: #efe4cc; --paper-dim: #e4d7ba;
@@ -800,6 +802,10 @@ ___GOOGLE_ADS_SCRIPT___
 
   #pago-box, #estado-box, #descarga-box { display: none; text-align: center; }
   #pago-box a, #descarga-box a { display: inline-block; margin-top: 12px; padding: 15px 28px; background: var(--rec); color: #fff5ee; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; }
+  #stripe-payment-element { text-align: left; margin-top: 14px; }
+  #btn-pagar { display: inline-block; margin-top: 16px; padding: 15px 28px; background: var(--rec); color: #fff5ee; border: none; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; font-family: inherit; cursor: pointer; width: 100%; }
+  #btn-pagar:disabled { opacity: 0.6; cursor: default; }
+  #stripe-error { color: #d14b3e; font-size: 13px; margin-top: 10px; display: none; }
   .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(36,26,16,0.15); border-top-color: var(--rec); border-radius: 50%; animation: girar 0.8s linear infinite; vertical-align: middle; margin-right: 8px; }
   @keyframes girar { to { transform: rotate(360deg); } }
 
@@ -942,11 +948,10 @@ ___GOOGLE_ADS_SCRIPT___
     </div>
 
     <div class="player" id="pago-box">
-      <p style="margin-top:0;">✅ Your lyrics are ready! Once you pay, we start recording.</p>
-      <a id="link-pago" href="#" onclick="if(window.gtag){gtag('event','begin_checkout',{value:27,currency:'USD'});}">Pay $27 &amp; Create My Song</a>
-      <p style="font-size:12px; color:var(--paper-ink-soft); margin-top:14px; margin-bottom:0;">
-        You'll come right back here once payment goes through.
-      </p>
+      <p style="margin-top:0;">✅ Your lyrics are ready! Pay below to start recording - no need to leave this page.</p>
+      <div id="stripe-payment-element"></div>
+      <button id="btn-pagar" type="button">Pay $27 &amp; Create My Song</button>
+      <p id="stripe-error"></p>
     </div>
 
     <div class="player" id="estado-box">
@@ -1037,6 +1042,52 @@ ___GOOGLE_ADS_SCRIPT___
 let sessionId = null;
 let pollTimer = null;
 const $ = (id) => document.getElementById(id);
+
+// Checkout embebido de Stripe (reemplaza a PayPal para EE.UU.) - la clave
+// publicable NO es secreta, se usa siempre del lado del navegador (ver
+// STRIPE_API_KEY en config.py). stripeInstance/stripeElements se crean una
+// sola vez, la primera vez que aparece un client_secret (letra recien
+// aprobada, o al retomar una sesion que ya tenia un pago pendiente).
+const STRIPE_PUBLISHABLE_KEY = "___STRIPE_PUBLISHABLE_KEY___";
+let stripeInstance = null;
+let stripeElements = null;
+let btnPagarConectado = false;
+
+function montarStripe(clientSecret) {
+  if (!clientSecret || !STRIPE_PUBLISHABLE_KEY) return;
+  if (!stripeInstance) stripeInstance = Stripe(STRIPE_PUBLISHABLE_KEY);
+  stripeElements = stripeInstance.elements({clientSecret});
+  stripeElements.create("payment").mount("#stripe-payment-element");
+  if (!btnPagarConectado) {
+    btnPagarConectado = true;
+    $("btn-pagar").addEventListener("click", confirmarPagoStripe);
+  }
+}
+
+async function confirmarPagoStripe() {
+  const btn = $("btn-pagar");
+  const errBox = $("stripe-error");
+  errBox.style.display = "none";
+  btn.disabled = true;
+  btn.textContent = "Processing...";
+  const {error} = await stripeInstance.confirmPayment({
+    elements: stripeElements,
+    redirect: "if_required",
+  });
+  if (error) {
+    errBox.textContent = error.message || "Something went wrong - please try again.";
+    errBox.style.display = "block";
+    btn.disabled = false;
+    btn.textContent = "Pay $27 & Create My Song";
+    return;
+  }
+  // El pago quedo aprobado del lado del navegador, pero la confirmacion REAL
+  // (que dispara la generacion en Suno) llega por el webhook de Stripe - ver
+  // /stripe/webhook en main.py. iniciarPolling() ya esta corriendo desde que
+  // se mostro este formulario, asi que en cuanto el webhook confirme el pago
+  // esta misma pantalla pasa sola al estado de "generando".
+  btn.textContent = "Payment received - starting...";
+}
 
 // Countdown atado a la fecha REAL de fin del precio de lanzamiento
 // (config.py -> LAUNCH_PRICE_ENDS_AT), inyectada por el servidor - el precio
@@ -1134,7 +1185,7 @@ async function retomarSesion() {
   const data = await resp.json();
   if (data.delivered && data.audio_urls && data.audio_urls.length) { mostrarDescarga(data.audio_urls); return true; }
   if (data.step === "generando" || data.paid) { $("estado-box").style.display = "block"; iniciarPolling(); return true; }
-  if (data.step === "esperando_pago" && data.payment_url) { $("link-pago").href = data.payment_url; $("pago-box").style.display = "block"; iniciarPolling(); return true; }
+  if (data.step === "esperando_pago" && data.stripe_client_secret) { montarStripe(data.stripe_client_secret); $("pago-box").style.display = "block"; iniciarPolling(); return true; }
   return false;
 }
 
@@ -1186,8 +1237,8 @@ async function enviarTurno(texto) {
     setTimeout(() => {
       window.location.href = "/?session_id=" + encodeURIComponent(data.redirect_session_id);
     }, 1800);
-  } else if (data.listo_para_pagar && data.payment_url) {
-    $("link-pago").href = data.payment_url;
+  } else if (data.listo_para_pagar && data.stripe_client_secret) {
+    montarStripe(data.stripe_client_secret);
     $("pago-box").style.display = "block";
     $("chat").style.display = "none";
     iniciarPolling();
@@ -1239,3 +1290,4 @@ LANDING_HTML_EN = LANDING_HTML_EN.replace("___JSON_LD___", _JSON_LD_EN)
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___CANONICAL_URL___", f"{BASE_URL}/")
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___LAUNCH_PRICE_ENDS_AT_ISO___", LAUNCH_PRICE_ENDS_AT)
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___BRAND___", BRAND_NAME_EN)
+LANDING_HTML_EN = LANDING_HTML_EN.replace("___STRIPE_PUBLISHABLE_KEY___", STRIPE_API_KEY)
