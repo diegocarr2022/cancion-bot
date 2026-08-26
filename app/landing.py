@@ -949,7 +949,7 @@ ___GOOGLE_ADS_SCRIPT___
 
     <div class="player" id="pago-box">
       <p style="margin-top:0;">✅ Your lyrics are ready! Pay below to start recording - no need to leave this page.</p>
-      <div id="stripe-payment-element"></div>
+      <div id="stripe-payment-element"><span class="spinner"></span>Setting up your payment...</div>
       <button id="btn-pagar" type="button">Pay $27 &amp; Create My Song</button>
       <p id="stripe-error"></p>
     </div>
