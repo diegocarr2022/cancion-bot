@@ -1129,10 +1129,25 @@ async function confirmarPagoStripe() {
   errBox.style.display = "none";
   btn.disabled = true;
   btn.textContent = "Processing...";
-  const {actions} = await checkoutInstance.loadActions();
-  const error = await actions.confirm();
-  if (error) {
-    errBox.textContent = error.message || "Something went wrong - please try again.";
+  try {
+    const {actions} = await checkoutInstance.loadActions();
+    // actions.confirm() devuelve {type: "success"} o {type: "error", error:
+    // {message}} - a diferencia del confirmPayment() viejo (que devolvia
+    // {error} directo, undefined en exito). Comparar el objeto entero como
+    // si fuera el error (como se hacia antes) siempre da verdadero, exito o
+    // no - por eso se quedaba trabado en "Processing..." sin avisar nada.
+    const result = await actions.confirm();
+    if (result.type === "error") {
+      const mensaje = result.error && result.error.message;
+      errBox.textContent = mensaje || "Something went wrong - please try again.";
+      errBox.style.display = "block";
+      btn.disabled = false;
+      btn.textContent = "Pay ___PRECIO_BADGE___ & Create My Song";
+      return;
+    }
+  } catch (e) {
+    console.error("confirmarPagoStripe error:", e);
+    errBox.textContent = (e && e.message) || "Something went wrong - please try again.";
     errBox.style.display = "block";
     btn.disabled = false;
     btn.textContent = "Pay ___PRECIO_BADGE___ & Create My Song";
