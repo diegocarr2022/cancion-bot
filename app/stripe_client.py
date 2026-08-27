@@ -77,12 +77,16 @@ async def create_checkout_session(
     ya existe para PayPal.
 
     Adaptive Pricing se activo a nivel cuenta en el dashboard
-    (dashboard.stripe.com/settings/adaptive-pricing, hecho por Diego) - no
-    se manda un parametro por sesion aca porque el primer intento con
-    adaptive_pricing[enabled] dio 400 Bad Request y todavia no se confirmo
-    el nombre/formato exacto del parametro contra un error real de Stripe
-    (ver log agregado abajo). Si Adaptive Pricing no aparece solo con el
-    toggle de cuenta, retomar esto."""
+    (dashboard.stripe.com/settings/adaptive-pricing, hecho por Diego).
+    adaptive_pricing[enabled]=true se manda ADEMAS por sesion aca abajo -
+    la primera vez que se probo dio 400 Bad Request, pero resulto ser
+    colateral del problema de version de API (ui_mode="elements", ya
+    arreglado con STRIPE_API_VERSION) que tumbaba la sesion ENTERA, no un
+    rechazo real de este parametro especifico - nunca se llego a confirmar
+    si el parametro en si era invalido. Sin el, la sesion no ofrecia ningun
+    currencyOptions ni mostraba el Currency Selector Element con una
+    tarjeta mexicana real (deberia haberlo hecho - MX esta en la lista de
+    paises soportados por Adaptive Pricing)."""
     amount_cents = int(round(amount * 100))
     data = {
         "mode": "payment",
@@ -96,6 +100,7 @@ async def create_checkout_session(
         # recupera a que pedido de web_orders corresponde - mismo rol que
         # custom_id en PayPal / metadata.session_id en el PaymentIntent viejo.
         "metadata[session_id]": session_id,
+        "adaptive_pricing[enabled]": "true",
     }
     if customer_email:
         data["customer_email"] = customer_email
