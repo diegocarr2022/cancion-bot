@@ -45,7 +45,11 @@ from app.paypal_client import (
     get_order as paypal_get_order,
     verify_webhook_signature as paypal_verify_webhook_signature,
 )
-from app.stripe_client import verify_webhook_signature as stripe_verify_webhook_signature
+from app.stripe_client import (
+    verify_webhook_signature as stripe_verify_webhook_signature,
+    get_payment_intent as stripe_get_payment_intent,
+    get_checkout_session as stripe_get_checkout_session,
+)
 from app.suno_client import get_task_status, generate_custom_song, extract_ready_items
 from app.telegram_client import send_document_by_url, send_message, set_webhook, get_me
 from app.web_conversation import handle_web_chat, crear_link_pago
@@ -1085,7 +1089,20 @@ async def stripe_webhook(request: Request, stripe_signature: str = Header(defaul
     event_type = event.get("type")
     log.info("Stripe webhook event_type=%s", event_type)
 
-    if event_type == "payment_intent.succeeded":
+    # ago 2026: checkout.session.completed es el evento nuevo (pedidos
+    # creados con Checkout Sessions, ver crear_link_pago en
+    # web_conversation.py) - payment_intent.succeeded se deja para
+    # cualquier pedido viejo con payment_request_id tipo "pi_..." que haya
+    # quedado pendiente de antes de este cambio (Diego agrego ambos eventos
+    # al endpoint del webhook en el dashboard de Stripe, test y live).
+    if event_type == "checkout.session.completed":
+        session = (event.get("data") or {}).get("object") or {}
+        session_id = (session.get("metadata") or {}).get("session_id")
+        if session_id and session.get("payment_status") == "paid":
+            order = db.get_web_order(session_id)
+            if order and not order["paid"]:
+                await confirmar_pago_web(session_id)
+    elif event_type == "payment_intent.succeeded":
         payment_intent = (event.get("data") or {}).get("object") or {}
         session_id = (payment_intent.get("metadata") or {}).get("session_id")
         if session_id:
@@ -1396,6 +1413,38 @@ async def check_web_payment_status(order: dict):
                 log.warning(
                     "El pago web (PayPal) de session_id=%s quedó en estado %s.",
                     order["session_id"], paypal_status,
+                )
+            return
+
+        if order.get("gateway") == "stripe":
+            # ago 2026: pedidos nuevos usan Checkout Sessions ("cs_...");
+            # cualquier pedido viejo que haya quedado con un PaymentIntent
+            # directo ("pi_...", de antes de este cambio) sigue consultado
+            # con el cliente viejo - ver plan de migracion.
+            payment_request_id = order["payment_request_id"]
+            if payment_request_id.startswith("cs_"):
+                checkout_session = await stripe_get_checkout_session(payment_request_id)
+                db.touch_last_checked_web(order["session_id"], datetime.utcnow().isoformat())
+                if checkout_session.get("payment_status") == "paid":
+                    await confirmar_pago_web(order["session_id"])
+                elif checkout_session.get("status") == "expired":
+                    db.update_web_order(order["session_id"], step="pago_fallido")
+                    log.warning(
+                        "El pago web (Stripe/Checkout) de session_id=%s expiró sin pagarse.",
+                        order["session_id"],
+                    )
+                return
+
+            payment_intent = await stripe_get_payment_intent(payment_request_id)
+            db.touch_last_checked_web(order["session_id"], datetime.utcnow().isoformat())
+            stripe_status = payment_intent.get("status")  # succeeded|requires_payment_method|requires_action|processing|canceled|...
+            if stripe_status == "succeeded":
+                await confirmar_pago_web(order["session_id"])
+            elif stripe_status == "canceled":
+                db.update_web_order(order["session_id"], step="pago_fallido")
+                log.warning(
+                    "El pago web (Stripe) de session_id=%s quedó en estado %s.",
+                    order["session_id"], stripe_status,
                 )
             return
 

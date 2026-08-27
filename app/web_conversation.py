@@ -22,7 +22,7 @@ from app.claude_client import (
 )
 from app.config import BASE_URL, get_precio_pais
 from app.dlocal_client import create_payment
-from app.stripe_client import create_payment_intent
+from app.stripe_client import create_checkout_session
 
 log = logging.getLogger("cancion-bot")
 
@@ -63,7 +63,11 @@ async def crear_link_pago(session_id: str, order: dict, precio: dict) -> dict:
         # Stripe reemplaza a PayPal aca (checkout embebido, sin redireccion -
         # ver app/stripe_client.py). PayPal se queda en el codigo solo para
         # pedidos viejos que ya hayan quedado con gateway=="paypal".
-        payment = await create_payment_intent(
+        # ago 2026: Checkout Sessions en vez de Payment Intents - habilita
+        # Adaptive Pricing (tarjetas de otros paises pagan en su propia
+        # moneda) y mejora la aceptacion de Amex, que fallaba antes de
+        # siquiera llegar a crear un intento de pago (ver plan).
+        payment = await create_checkout_session(
             amount=precio["amount"],
             currency=precio["currency"],
             session_id=session_id,

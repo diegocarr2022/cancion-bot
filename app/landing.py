@@ -826,7 +826,8 @@ ___GOOGLE_ADS_SCRIPT___
 
   #pago-box, #estado-box, #descarga-box { display: none; text-align: center; }
   #pago-box a, #descarga-box a { display: inline-block; margin-top: 12px; padding: 15px 28px; background: var(--rec); color: #fff5ee; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; }
-  #stripe-payment-element { text-align: left; margin-top: 14px; }
+  #stripe-currency-selector { text-align: left; margin-top: 14px; }
+  #stripe-payment-element { text-align: left; margin-top: 10px; }
   #btn-pagar { display: inline-block; margin-top: 16px; padding: 15px 28px; background: var(--rec); color: #fff5ee; border: none; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; font-family: inherit; cursor: pointer; width: 100%; }
   #btn-pagar:disabled { opacity: 0.6; cursor: default; }
   #stripe-error { color: #d14b3e; font-size: 13px; margin-top: 10px; display: none; }
@@ -973,6 +974,7 @@ ___GOOGLE_ADS_SCRIPT___
 
     <div class="player" id="pago-box">
       <p style="margin-top:0;">✅ Your lyrics are ready! Pay below to start recording - no need to leave this page.</p>
+      <div id="stripe-currency-selector"></div>
       <div id="stripe-payment-element"><span class="spinner"></span>Setting up your payment...</div>
       <button id="btn-pagar" type="button">Pay ___PRECIO_BADGE___ &amp; Create My Song</button>
       <p id="stripe-error"></p>
@@ -1069,19 +1071,47 @@ const $ = (id) => document.getElementById(id);
 
 // Checkout embebido de Stripe (reemplaza a PayPal para EE.UU.) - la clave
 // publicable NO es secreta, se usa siempre del lado del navegador (ver
-// STRIPE_API_KEY en config.py). stripeInstance/stripeElements se crean una
+// STRIPE_API_KEY en config.py).
+//
+// ago 2026: Checkout Sessions (ui_mode="elements") en vez de Payment
+// Intents - habilita Adaptive Pricing (el Currency Selector Element de
+// abajo, obligatorio mostrarlo) y mejora la aceptacion de Amex, que con
+// Payment Intents fallaba del lado del navegador antes de intentar cobrar
+// (ver plan de migracion). stripeInstance/checkoutInstance se crean una
 // sola vez, la primera vez que aparece un client_secret (letra recien
 // aprobada, o al retomar una sesion que ya tenia un pago pendiente).
 const STRIPE_PUBLISHABLE_KEY = "___STRIPE_PUBLISHABLE_KEY___";
 let stripeInstance = null;
-let stripeElements = null;
+let checkoutInstance = null;
 let btnPagarConectado = false;
 
-function montarStripe(clientSecret) {
+async function montarStripe(clientSecret) {
   if (!clientSecret || !STRIPE_PUBLISHABLE_KEY) return;
   if (!stripeInstance) stripeInstance = Stripe(STRIPE_PUBLISHABLE_KEY);
-  stripeElements = stripeInstance.elements({clientSecret});
-  stripeElements.create("payment").mount("#stripe-payment-element");
+  const errBox = $("stripe-error");
+  try {
+    checkoutInstance = await stripeInstance.initCheckoutElementsSdk({
+      clientSecret,
+      // Requisito de Stripe: mostrar el Currency Selector Element si se
+      // usa Adaptive Pricing (ver adaptive_pricing[enabled] en
+      // stripe_client.create_checkout_session) - no es opcional/decorativo.
+      adaptivePricing: {allowed: true},
+    });
+  } catch (e) {
+    // La Checkout Session expira sola a las 24h (a diferencia del
+    // PaymentIntent viejo, que no vencia solo) - si el cliente vuelve
+    // despues de eso con un client_secret muerto, no hay forma de
+    // "revivirlo" del lado del navegador. Pedirle que recargue es lo mas
+    // simple y seguro por ahora; si esto pasa seguido en producción real
+    // vale la pena armar un endpoint que regenere la sesion sola (mismo
+    // patron que ya existe para links de PayPal muertos en
+    // _buscar_pedido_por_correo, web_conversation.py).
+    errBox.textContent = "Your payment session expired - please refresh the page to try again.";
+    errBox.style.display = "block";
+    return;
+  }
+  checkoutInstance.createCurrencySelectorElement().mount("#stripe-currency-selector");
+  checkoutInstance.createPaymentElement().mount("#stripe-payment-element");
   if (!btnPagarConectado) {
     btnPagarConectado = true;
     $("btn-pagar").addEventListener("click", confirmarPagoStripe);
@@ -1094,10 +1124,8 @@ async function confirmarPagoStripe() {
   errBox.style.display = "none";
   btn.disabled = true;
   btn.textContent = "Processing...";
-  const {error} = await stripeInstance.confirmPayment({
-    elements: stripeElements,
-    redirect: "if_required",
-  });
+  const {actions} = await checkoutInstance.loadActions();
+  const error = await actions.confirm();
   if (error) {
     errBox.textContent = error.message || "Something went wrong - please try again.";
     errBox.style.display = "block";
@@ -1107,9 +1135,10 @@ async function confirmarPagoStripe() {
   }
   // El pago quedo aprobado del lado del navegador, pero la confirmacion REAL
   // (que dispara la generacion en Suno) llega por el webhook de Stripe - ver
-  // /stripe/webhook en main.py. iniciarPolling() ya esta corriendo desde que
-  // se mostro este formulario, asi que en cuanto el webhook confirme el pago
-  // esta misma pantalla pasa sola al estado de "generando".
+  // checkout.session.completed en /stripe/webhook, app/main.py.
+  // iniciarPolling() ya esta corriendo desde que se mostro este formulario,
+  // asi que en cuanto el webhook confirme el pago esta misma pantalla pasa
+  // sola al estado de "generando".
   btn.textContent = "Payment received - starting...";
 }
 
