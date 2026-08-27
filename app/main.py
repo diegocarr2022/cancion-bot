@@ -160,10 +160,39 @@ async def health():
 # para Quality Score. Default ingles salvo que pidan español explicito
 # (?lang=es) o el navegador lo indique (Accept-Language) - al reves de como
 # era antes, cuando el default era español y EE.UU. la excepcion.
+def _render_landing_en(request: Request) -> str:
+    """LANDING_HTML_EN con el badge de precio resuelto por request (ver
+    PRECIO_TIPO_CAMBIO_MXN_EN en config.py) - LANDING_HTML_EN deja
+    ___PRECIO_BADGE_DYNAMIC___/___PRECIO_BADGE_WAS_DYNAMIC___ sin resolver a
+    proposito (a diferencia de ___PRECIO_BADGE___, que se resuelve una sola
+    vez al importar el modulo para el meta/og/JSON-LD, que no varia por
+    visitante) para poder sustituirlos aca, con el MISMO precio que despues
+    se cobra de verdad en /web/session - nunca deben desincronizarse (ver
+    resolve_precio_orden en config.py). Usar SIEMPRE esta funcion (nunca
+    LANDING_HTML_EN directo) en cualquier ruta que sirva la landing en
+    ingles - la raiz "/" y "/cancion" ambas la necesitan."""
+    detected_country = (request.headers.get("cf-ipcountry") or "").strip().upper()
+    if detected_country == "MX":
+        precio_mx = get_precio_en_mx("song")
+        badge = precio_mx["texto"]
+        badge_was = get_precio_en_mx_was()
+    else:
+        badge = PRECIO_BADGE_EN
+        badge_was = PRECIO_BADGE_WAS_EN
+
+    return (
+        LANDING_HTML_EN
+        .replace("___PRECIO_BADGE_DYNAMIC___", badge)
+        .replace("___PRECIO_BADGE_WAS_DYNAMIC___", badge_was)
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 async def raiz(request: Request, lang: str | None = None):
     resolved_lang = (lang or "").strip().lower()
-    return LANDING_HTML_ES if resolved_lang == "es" else LANDING_HTML_EN
+    if resolved_lang == "es":
+        return LANDING_HTML_ES
+    return _render_landing_en(request)
 
 
 # ---------------------------------------------------------------------------
@@ -213,29 +242,7 @@ async def cancion_landing(request: Request, lang: str | None = None):
     resolved_lang = (lang or "").strip().lower()
     if resolved_lang != "en":
         return LANDING_HTML_ES
-
-    # ago 2026: badge de precio dinamico para Mexico en la landing en ingles
-    # (ver PRECIO_TIPO_CAMBIO_MXN_EN en config.py) - LANDING_HTML_EN deja
-    # ___PRECIO_BADGE_DYNAMIC___/___PRECIO_BADGE_WAS_DYNAMIC___ sin resolver
-    # a proposito (a diferencia de ___PRECIO_BADGE___, que se resuelve una
-    # sola vez al importar el modulo para el meta/og/JSON-LD, que no varia
-    # por visitante) para poder sustituirlos aca, por request, con el MISMO
-    # precio que despues se cobra de verdad en /web/session - nunca deben
-    # desincronizarse (ver resolve_precio_orden en config.py).
-    detected_country = (request.headers.get("cf-ipcountry") or "").strip().upper()
-    if detected_country == "MX":
-        precio_mx = get_precio_en_mx("song")
-        badge = precio_mx["texto"]
-        badge_was = get_precio_en_mx_was()
-    else:
-        badge = PRECIO_BADGE_EN
-        badge_was = PRECIO_BADGE_WAS_EN
-
-    return (
-        LANDING_HTML_EN
-        .replace("___PRECIO_BADGE_DYNAMIC___", badge)
-        .replace("___PRECIO_BADGE_WAS_DYNAMIC___", badge_was)
-    )
+    return _render_landing_en(request)
 
 
 
