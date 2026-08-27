@@ -23,11 +23,14 @@ antes de este cambio (los nuevos son "cs_...").
 import hashlib
 import hmac
 import json
+import logging
 import time
 
 import httpx
 
 from app.config import STRIPE_SECRET, BASE_URL
+
+log = logging.getLogger("cancion-bot")
 
 STRIPE_BASE_URL = "https://api.stripe.com/v1"
 
@@ -51,10 +54,13 @@ async def create_checkout_session(amount: float, currency: str, session_id: str,
     que si redirige, ej. algun banco) - reusa la misma pagina de retorno que
     ya existe para PayPal.
 
-    adaptive_pricing[enabled]=true se pasa explicito aca por sesion, en vez
-    de depender solo del toggle de cuenta en el dashboard (Diego igual debe
-    activarlo una vez en dashboard.stripe.com/settings/adaptive-pricing -
-    ver plan) - asi no se rompe si algun dia se desactiva a nivel cuenta."""
+    Adaptive Pricing se activo a nivel cuenta en el dashboard
+    (dashboard.stripe.com/settings/adaptive-pricing, hecho por Diego) - no
+    se manda un parametro por sesion aca porque el primer intento con
+    adaptive_pricing[enabled] dio 400 Bad Request y todavia no se confirmo
+    el nombre/formato exacto del parametro contra un error real de Stripe
+    (ver log agregado abajo). Si Adaptive Pricing no aparece solo con el
+    toggle de cuenta, retomar esto."""
     amount_cents = int(round(amount * 100))
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
@@ -68,7 +74,6 @@ async def create_checkout_session(amount: float, currency: str, session_id: str,
                 "line_items[0][price_data][unit_amount]": amount_cents,
                 "line_items[0][quantity]": 1,
                 "return_url": f"{BASE_URL}/pago-exitoso/web/{session_id}",
-                "adaptive_pricing[enabled]": "true",
                 # metadata.session_id es como el webhook (checkout.session.completed)
                 # recupera a que pedido de web_orders corresponde - mismo rol
                 # que custom_id en PayPal / metadata.session_id en el
@@ -76,6 +81,12 @@ async def create_checkout_session(amount: float, currency: str, session_id: str,
                 "metadata[session_id]": session_id,
             },
         )
+        if resp.status_code >= 400:
+            # Stripe manda el motivo real del rechazo en el cuerpo (ej.
+            # parametro invalido, capacidad no habilitada) - httpx no lo
+            # incluye en el mensaje de raise_for_status(), y sin esto el
+            # log solo dice "400 Bad Request" sin decir por que.
+            log.error("Stripe rechazo la creacion de la Checkout Session: %s", resp.text)
         resp.raise_for_status()
         data = resp.json()
         return {"client_secret": data["client_secret"], "id": data["id"]}
