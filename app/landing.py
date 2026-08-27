@@ -724,7 +724,12 @@ LANDING_HTML_EN = """<!DOCTYPE html>
 ___JSON_LD___
 ___META_PIXEL_SCRIPT___
 ___GOOGLE_ADS_SCRIPT___
-<script src="https://js.stripe.com/v3/"></script>
+<!-- ago 2026: version con nombre ("dahlia"), no la generica /v3/ - initCheckoutElementsSdk
+     (Checkout Sessions ui_mode="elements") exige por lo menos la release "basil";
+     se usa la misma que STRIPE_API_VERSION en stripe_client.py (Stripe.js versionado
+     usa automaticamente la version de API de su propia release, no se puede
+     mezclar - docs.stripe.com/sdks/stripejs-versioning). -->
+<script src="https://js.stripe.com/dahlia/stripe.js"></script>
 <style>
   :root {
     --ink: #16110d; --ink-raised: #1e1710; --paper: #efe4cc; --paper-dim: #e4d7ba;
