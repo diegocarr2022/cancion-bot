@@ -37,12 +37,20 @@ STRIPE_BASE_URL = "https://api.stripe.com/v1"
 # La cuenta de Stripe de Diego tiene fijada una version de API mas vieja que
 # no soporta ui_mode="elements" - confirmado con el error real de Stripe:
 # "Invalid ui_mode: elements. In order to use ui_mode: elements, you must
-# upgrade to Stripe API version 2026-03-25.dahlia." Se manda este header
-# SOLO en las llamadas de Checkout Sessions (create/get, mas abajo) en vez
-# de cambiar la version default de toda la cuenta en el dashboard - asi no
-# se arriesga a cambiar el comportamiento de ninguna otra integracion que
-# use la cuenta sin querer.
-STRIPE_API_VERSION = "2026-03-25.dahlia"
+# upgrade to Stripe API version 2026-03-25.dahlia." Esa fue la version MINIMA
+# que exigio el error, no necesariamente la mas completa - Stripe publica
+# minors nuevos dentro del mismo release (dahlia) todos los meses, sin
+# romper nada, y la version vigente hoy segun docs.stripe.com/sdks/versioning
+# es 2026-07-29.dahlia. Se uso esa mas reciente en vez de la minima, por si
+# Adaptive Pricing (Currency Selector Element) necesitaba alguno de esos
+# minors intermedios - Diego reporto que el selector de moneda seguia sin
+# aparecer con la version minima puesta.
+#
+# Se manda este header SOLO en las llamadas de Checkout Sessions
+# (create/get, mas abajo) en vez de cambiar la version default de toda la
+# cuenta en el dashboard - asi no se arriesga a cambiar el comportamiento
+# de ninguna otra integracion que use la cuenta sin querer.
+STRIPE_API_VERSION = "2026-07-29.dahlia"
 
 # Tolerancia recomendada por Stripe contra ataques de repeticion (nunca 0 -
 # ver docs.stripe.com/webhooks#verify-manually).
