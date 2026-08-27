@@ -1102,13 +1102,16 @@ async function montarStripe(clientSecret, email) {
       // stripe_client.create_checkout_session) - no es opcional/decorativo.
       adaptivePricing: {allowed: true},
     });
-    if (email) {
-      // Checkout Sessions exige el correo ANTES de poder confirmar
-      // (actions.confirm() rechaza con "An email address is required..."
-      // si no se llamo esto antes) - a diferencia del PaymentIntent viejo.
-      // Ya lo pidio Claude en el chat, no hace falta pedirlo de nuevo aca.
-      await checkoutInstance.updateEmail(email);
-    }
+    // Checkout Sessions exige el correo ANTES de poder confirmar
+    // (actions.confirm() rechaza con "An email address is required...").
+    // NO se llama actions.updateEmail() aca a proposito: como el correo ya
+    // se manda al crear la sesion (customer_email, ver
+    // stripe_client.create_checkout_session), Stripe lo deja precargado -
+    // intentar updateEmail() encima de eso tira "You cannot update the
+    // email because a customer_email ... is already set" (confirmado con
+    // un error real). El parametro `email` de esta funcion ya no hace
+    // falta, se deja sin usar por si algun dia se necesita un correo
+    // distinto al de la sesion.
   } catch (e) {
     // La Checkout Session expira sola a las 24h (a diferencia del
     // PaymentIntent viejo, que no vencia solo) - si el cliente vuelve

@@ -58,14 +58,15 @@ async def create_checkout_session(
     tocar el resto del flujo (web_conversation.py sigue guardando
     payment.get("client_secret")/payment["id"] igual que antes).
 
-    customer_email: precarga el correo en la sesion (recibo, etc.) - PERO
-    esto solo no alcanza para poder confirmar el pago del lado del
-    navegador. Checkout Sessions (a diferencia del PaymentIntent viejo)
-    exige que el frontend llame actions.updateEmail(...) antes de
-    actions.confirm() o tira "An email address is required..." -
-    confirmado con un error real de Stripe. Por eso ademas de mandarlo aca,
-    /web/status y /web/chat devuelven "email" para que landing.py se lo
-    pase a updateEmail() (ver montarStripe en LANDING_HTML_EN).
+    customer_email: Checkout Sessions (a diferencia del PaymentIntent viejo)
+    exige un correo antes de poder confirmar del lado del navegador
+    (actions.confirm() rechaza con "An email address is required..." si no
+    hay ninguno). Mandarlo aca, al crear la sesion, alcanza por si solo -
+    confirmado con un error real: si el frontend ADEMAS llama
+    actions.updateEmail() encima de un customer_email ya seteado, Stripe
+    tira "You cannot update the email because a customer_email ... is
+    already set" - por eso montarStripe() en LANDING_HTML_EN
+    deliberadamente NO llama updateEmail(), solo confia en este parametro.
 
     ui_mode="elements" (no "embedded"): es el unico modo compatible con el
     Currency Selector Element que requiere Adaptive Pricing, y el que deja
