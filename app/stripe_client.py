@@ -34,6 +34,16 @@ log = logging.getLogger("cancion-bot")
 
 STRIPE_BASE_URL = "https://api.stripe.com/v1"
 
+# La cuenta de Stripe de Diego tiene fijada una version de API mas vieja que
+# no soporta ui_mode="elements" - confirmado con el error real de Stripe:
+# "Invalid ui_mode: elements. In order to use ui_mode: elements, you must
+# upgrade to Stripe API version 2026-03-25.dahlia." Se manda este header
+# SOLO en las llamadas de Checkout Sessions (create/get, mas abajo) en vez
+# de cambiar la version default de toda la cuenta en el dashboard - asi no
+# se arriesga a cambiar el comportamiento de ninguna otra integracion que
+# use la cuenta sin querer.
+STRIPE_API_VERSION = "2026-03-25.dahlia"
+
 # Tolerancia recomendada por Stripe contra ataques de repeticion (nunca 0 -
 # ver docs.stripe.com/webhooks#verify-manually).
 WEBHOOK_TOLERANCE_SECONDS = 300
@@ -65,7 +75,10 @@ async def create_checkout_session(amount: float, currency: str, session_id: str,
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
             f"{STRIPE_BASE_URL}/checkout/sessions",
-            headers={"Authorization": f"Bearer {STRIPE_SECRET}"},
+            headers={
+                "Authorization": f"Bearer {STRIPE_SECRET}",
+                "Stripe-Version": STRIPE_API_VERSION,
+            },
             data={
                 "mode": "payment",
                 "ui_mode": "elements",
@@ -96,7 +109,10 @@ async def get_checkout_session(checkout_session_id: str) -> dict:
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(
             f"{STRIPE_BASE_URL}/checkout/sessions/{checkout_session_id}",
-            headers={"Authorization": f"Bearer {STRIPE_SECRET}"},
+            headers={
+                "Authorization": f"Bearer {STRIPE_SECRET}",
+                "Stripe-Version": STRIPE_API_VERSION,
+            },
         )
         resp.raise_for_status()
         return resp.json()
