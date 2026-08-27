@@ -282,9 +282,11 @@ ___GOOGLE_ADS_SCRIPT___
     background: white; border-radius: 16px; padding: 18px;
     box-shadow: 0 4px 20px rgba(180,120,60,0.10); margin-bottom: 16px;
   }
-  input[type=text] {
+  #input-mensaje {
     width: 100%; padding: 13px 14px; border-radius: 10px; border: 1px solid #e7dccb;
-    font-size: 16px; margin-bottom: 0;
+    font-size: 16px; font-family: inherit; margin-bottom: 0;
+    resize: none; overflow-y: auto; line-height: 1.4;
+    min-height: 46px; max-height: 130px;
   }
   button {
     padding: 14px; border-radius: 10px; border: none;
@@ -296,8 +298,7 @@ ___GOOGLE_ADS_SCRIPT___
   .msg { padding: 10px 14px; border-radius: 14px; margin: 6px 0; font-size: 15px; line-height: 1.45; white-space: pre-wrap; }
   .msg.bot { background: #fff1e2; color: #4a3b26; border-bottom-left-radius: 4px; max-width: 92%; }
   .msg.user { background: #292018; color: white; margin-left: auto; border-bottom-right-radius: 4px; max-width: 85%; }
-  .fila-input { display: flex; gap: 8px; }
-  .fila-input input { margin-bottom: 0; }
+  .fila-input { display: flex; gap: 8px; align-items: flex-end; }
   .fila-input button { width: auto; padding: 13px 18px; }
   #pago-box, #estado-box, #descarga-box { display: none; text-align: center; }
   #pago-box a, #descarga-box a {
@@ -379,7 +380,7 @@ ___GOOGLE_ADS_SCRIPT___
     <p class="chat-titulo">Comienza aquí...</p>
     <div id="mensajes"></div>
     <div class="fila-input">
-      <input type="text" id="input-mensaje" placeholder="Escribe aquí..." disabled>
+      <textarea id="input-mensaje" placeholder="Escribe aquí..." rows="1" disabled></textarea>
       <button id="btn-enviar" disabled>Enviar</button>
     </div>
   </div>
@@ -590,14 +591,34 @@ function iniciarPolling() {
   }, 5000);
 }
 
+// Textarea que crece con el texto (en vez del <input> de una sola linea
+// de antes) - reportado como dificil de leer (el texto se salia
+// horizontalmente) y, en movil, dificil de tocar para reposicionar el
+// cursor (justamente porque el texto scrolleado quedaba fuera de vista).
+// Crece hasta max-height (ver CSS de #input-mensaje) y despues scrollea
+// internamente en vez de seguir creciendo sin limite.
+function ajustarAlturaInput() {
+  const el = $("input-mensaje");
+  el.style.height = "auto";
+  el.style.height = el.scrollHeight + "px";
+}
+$("input-mensaje").addEventListener("input", ajustarAlturaInput);
+
 $("btn-enviar").addEventListener("click", () => {
   const val = $("input-mensaje").value.trim();
   if (!val) return;
   $("input-mensaje").value = "";
+  ajustarAlturaInput();
   enviarTurno(val);
 });
 $("input-mensaje").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") $("btn-enviar").click();
+  // Enter solo (sin Shift) manda el mensaje, igual que antes con el
+  // <input> de una linea. Shift+Enter mete un salto de linea - la
+  // convencion estandar en cajas de chat (WhatsApp, Slack, etc.).
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    $("btn-enviar").click();
+  }
 });
 
 // Al reproducir un audio de muestra (estilos o pasos), pausa cualquier otro
@@ -813,9 +834,13 @@ ___GOOGLE_ADS_SCRIPT___
   .msg.bot { background: rgba(36,26,16,0.06); color: var(--paper-ink); border-bottom-left-radius: 4px; max-width: 92%; }
   .msg.user { background: var(--ink); color: var(--paper); margin-left: auto; border-bottom-right-radius: 4px; max-width: 85%; }
 
-  input[type=text] { width: 100%; padding: 18px 16px; border-radius: 12px; border: 1px solid rgba(36,26,16,0.15); font-size: 16px; font-family: 'Work Sans', sans-serif; background: #fff; }
+  #input-mensaje {
+    width: 100%; padding: 18px 16px; border-radius: 12px; border: 1px solid rgba(36,26,16,0.15);
+    font-size: 16px; font-family: 'Work Sans', sans-serif; background: #fff;
+    resize: none; overflow-y: auto; line-height: 1.4;
+    min-height: 58px; max-height: 160px;
+  }
   .fila-input { display: flex; flex-direction: column; gap: 10px; }
-  .fila-input input { margin-bottom: 0; }
   button { padding: 16px; border-radius: 12px; border: none; background: var(--ink); color: var(--paper); font-size: 15px; font-weight: 700; cursor: pointer; font-family: 'Work Sans', sans-serif; }
   button:disabled { opacity: 0.4; cursor: default; }
   .fila-input button { width: 100%; }
@@ -972,7 +997,7 @@ ___GOOGLE_ADS_SCRIPT___
       <p class="chat-sub">Takes about 2 minutes. No account, no commitment yet.</p>
       <div id="mensajes"></div>
       <div class="fila-input">
-        <input type="text" id="input-mensaje" placeholder="Type here..." disabled>
+        <textarea id="input-mensaje" placeholder="Type here..." rows="1" disabled></textarea>
         <button id="btn-enviar" disabled>Send</button>
       </div>
     </div>
@@ -1351,13 +1376,35 @@ function iniciarPolling() {
   }, 5000);
 }
 
+// Textarea que crece con el texto (en vez del <input> de una sola linea de
+// antes) - reportado como dificil de leer (el texto se salia
+// horizontalmente) y, en movil, dificil de tocar para reposicionar el
+// cursor (justamente porque el texto scrolleado quedaba fuera de vista).
+// Crece hasta max-height (ver CSS de #input-mensaje) y despues scrollea
+// internamente en vez de seguir creciendo sin limite.
+function ajustarAlturaInput() {
+  const el = $("input-mensaje");
+  el.style.height = "auto";
+  el.style.height = el.scrollHeight + "px";
+}
+$("input-mensaje").addEventListener("input", ajustarAlturaInput);
+
 $("btn-enviar").addEventListener("click", () => {
   const val = $("input-mensaje").value.trim();
   if (!val) return;
   $("input-mensaje").value = "";
+  ajustarAlturaInput();
   enviarTurno(val);
 });
-$("input-mensaje").addEventListener("keydown", (e) => { if (e.key === "Enter") $("btn-enviar").click(); });
+$("input-mensaje").addEventListener("keydown", (e) => {
+  // Enter solo (sin Shift) manda el mensaje, igual que antes con el
+  // <input> de una linea. Shift+Enter mete un salto de linea - la
+  // convencion estandar en cajas de chat (WhatsApp, Slack, etc.).
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    $("btn-enviar").click();
+  }
+});
 
 document.querySelectorAll("audio").forEach((audio) => {
   audio.addEventListener("play", () => {

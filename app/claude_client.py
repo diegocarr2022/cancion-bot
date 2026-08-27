@@ -483,7 +483,10 @@ conversation. Your job is to:
    ask one thing at a time. At some point in the conversation (not
    necessarily right away, so it doesn't feel like a form) ask for their
    email too, explaining it's so you can send the song there as a backup
-   besides the link that will appear on screen.
+   besides the link that will appear on screen - briefly reassure them
+   it's only used to deliver their song, nothing else (no spam, never
+   shared with anyone). Keep this natural and brief, one short clause, not
+   a legal disclaimer.
 
 2. As soon as you have the minimum data (name, who it's for,
    relationship/occasion, musical style, at least 1-2 details/anecdotes, AND
