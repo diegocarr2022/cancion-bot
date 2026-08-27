@@ -1090,7 +1090,7 @@ let stripeInstance = null;
 let checkoutInstance = null;
 let btnPagarConectado = false;
 
-async function montarStripe(clientSecret) {
+async function montarStripe(clientSecret, email) {
   if (!clientSecret || !STRIPE_PUBLISHABLE_KEY) return;
   if (!stripeInstance) stripeInstance = Stripe(STRIPE_PUBLISHABLE_KEY);
   const errBox = $("stripe-error");
@@ -1102,6 +1102,13 @@ async function montarStripe(clientSecret) {
       // stripe_client.create_checkout_session) - no es opcional/decorativo.
       adaptivePricing: {allowed: true},
     });
+    if (email) {
+      // Checkout Sessions exige el correo ANTES de poder confirmar
+      // (actions.confirm() rechaza con "An email address is required..."
+      // si no se llamo esto antes) - a diferencia del PaymentIntent viejo.
+      // Ya lo pidio Claude en el chat, no hace falta pedirlo de nuevo aca.
+      await checkoutInstance.updateEmail(email);
+    }
   } catch (e) {
     // La Checkout Session expira sola a las 24h (a diferencia del
     // PaymentIntent viejo, que no vencia solo) - si el cliente vuelve
@@ -1258,7 +1265,7 @@ async function retomarSesion() {
   const data = await resp.json();
   if (data.delivered && data.audio_urls && data.audio_urls.length) { mostrarDescarga(data.audio_urls); return true; }
   if (data.step === "generando" || data.paid) { $("estado-box").style.display = "block"; iniciarPolling(); return true; }
-  if (data.step === "esperando_pago" && data.stripe_client_secret) { montarStripe(data.stripe_client_secret); $("pago-box").style.display = "block"; iniciarPolling(); return true; }
+  if (data.step === "esperando_pago" && data.stripe_client_secret) { montarStripe(data.stripe_client_secret, data.email); $("pago-box").style.display = "block"; iniciarPolling(); return true; }
   return false;
 }
 
@@ -1311,7 +1318,7 @@ async function enviarTurno(texto) {
       window.location.href = "/?session_id=" + encodeURIComponent(data.redirect_session_id);
     }, 1800);
   } else if (data.listo_para_pagar && data.stripe_client_secret) {
-    montarStripe(data.stripe_client_secret);
+    montarStripe(data.stripe_client_secret, data.email);
     $("pago-box").style.display = "block";
     $("chat").style.display = "none";
     iniciarPolling();

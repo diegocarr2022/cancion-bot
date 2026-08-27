@@ -328,6 +328,14 @@ async def web_status(session_id: str):
         "audio_urls": audio_urls,
         "payment_url": order.get("payment_url"),
         "stripe_client_secret": order.get("stripe_client_secret"),
+        # Checkout Sessions (Stripe, ago 2026) exige el correo del cliente
+        # ANTES de poder confirmar el pago (actions.confirm() rechaza con
+        # "An email address is required..." si no se llamo antes
+        # actions.updateEmail() - a diferencia del PaymentIntent viejo, que
+        # no lo pedia). Ya lo tenemos guardado desde el chat (ver
+        # _finalizar_letra en web_conversation.py) - se lo mandamos al
+        # frontend para que se lo pase a Stripe sin pedirlo de nuevo.
+        "email": order.get("email"),
         "gateway": order.get("gateway"),
         "final_title": order.get("final_title"),
         # tier/video_status/video_url: usados por el frontend en ingles para

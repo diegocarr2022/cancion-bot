@@ -43,12 +43,21 @@ KICKOFF_TEXT_EN = (
 )
 
 
-async def crear_link_pago(session_id: str, order: dict, precio: dict) -> dict:
+async def crear_link_pago(session_id: str, order: dict, precio: dict, customer_email: str | None = None) -> dict:
     """Crea (o re-crea) el link de pago de un pedido web con letra ya
     aprobada. Separado de _finalizar_letra para poder reutilizarlo desde
     _buscar_pedido_por_correo: si se recupera un pedido sin pagar, el link
     viejo puede haber expirado o el pago haber sido rechazado, asi que ahi
-    se genera uno FRESCO en vez de devolver el que ya podria estar muerto."""
+    se genera uno FRESCO en vez de devolver el que ya podria estar muerto.
+
+    customer_email: opcional, default None -> cae a order.get("email").
+    _finalizar_letra manda el correo recien parseado de este mismo turno
+    (mas actualizado que el `order` que se le paso, que es de antes de
+    guardarlo en la DB); _buscar_pedido_por_correo no lo manda, asi que usa
+    el que ya trae el `order` que encontro. Checkout Sessions de Stripe
+    (ago 2026) lo necesita para poder confirmar el pago del lado del
+    navegador (ver stripe_client.create_checkout_session)."""
+    customer_email = customer_email or order.get("email")
     order_id = f"web-{session_id}-{int(time.time())}"
     # EE.UU. paga via PayPal (dLocal Go no puede cobrarle a alguien
     # fisicamente en EE.UU. - ver app/paypal_client.py); el resto de paises
@@ -72,6 +81,7 @@ async def crear_link_pago(session_id: str, order: dict, precio: dict) -> dict:
             currency=precio["currency"],
             session_id=session_id,
             description=descripcion,
+            customer_email=customer_email,
         )
         gateway = "stripe"
     else:
@@ -132,6 +142,10 @@ async def _finalizar_letra(session_id: str, order: dict, precio: dict, tool_inpu
             "finalizar_letra (web) llamado sin un correo valido para session_id=%s: %r",
             session_id, email,
         )
+        # order["email"] puede venir de un turno anterior si Claude ya lo
+        # habia pedido antes en la charla - no pisar un correo valido ya
+        # guardado solo porque este turno en particular no lo repitio.
+        email = order.get("email") or email
     if customer_name:
         db.update_web_order(session_id, customer_name=customer_name)
     else:
@@ -140,7 +154,7 @@ async def _finalizar_letra(session_id: str, order: dict, precio: dict, tool_inpu
         )
 
     try:
-        payment = await crear_link_pago(session_id, order, precio)
+        payment = await crear_link_pago(session_id, order, precio, customer_email=email)
     except Exception:
         log.exception(
             "Error creando el pago web para session_id=%s", session_id,
@@ -153,6 +167,7 @@ async def _finalizar_letra(session_id: str, order: dict, precio: dict, tool_inpu
     resultado["listo_para_pagar"] = True
     resultado["payment_url"] = payment.get("redirect_url")
     resultado["stripe_client_secret"] = payment.get("client_secret")
+    resultado["email"] = email
     return (
         "Se genero el link de pago correctamente. Ya se le va a mostrar el formulario de "
         "pago en la misma pantalla (sin salir de la pagina) - en tu mensaje de texto "
@@ -255,6 +270,7 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
             "mensajes": [], "listo_para_pagar": False,
             "payment_url": order.get("payment_url"),
             "stripe_client_secret": order.get("stripe_client_secret"),
+            "email": order.get("email"),
         }
 
     resultado = {
@@ -262,6 +278,7 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
         # client_secret del Payment Element de Stripe (flujo EN) - None para
         # el flujo ES/dLocal, que sigue usando payment_url con redireccion.
         "stripe_client_secret": None,
+        "email": None,
         # Si buscar_pedido_por_correo/find_previous_order encuentra un
         # pedido real, el frontend redirige a esta sesion en vez de seguir
         # en la nueva - ver retomarSesion() en landing.py.

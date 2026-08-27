@@ -49,12 +49,23 @@ STRIPE_API_VERSION = "2026-03-25.dahlia"
 WEBHOOK_TOLERANCE_SECONDS = 300
 
 
-async def create_checkout_session(amount: float, currency: str, session_id: str, description: str) -> dict:
+async def create_checkout_session(
+    amount: float, currency: str, session_id: str, description: str, customer_email: str | None = None
+) -> dict:
     """Devuelve {"client_secret": ..., "id": ...} - el "id" ahora es un
     Checkout Session id (formato "cs_..."), no un PaymentIntent id
     ("pi_..."). Mismo shape que create_payment_intent() para no tener que
     tocar el resto del flujo (web_conversation.py sigue guardando
     payment.get("client_secret")/payment["id"] igual que antes).
+
+    customer_email: precarga el correo en la sesion (recibo, etc.) - PERO
+    esto solo no alcanza para poder confirmar el pago del lado del
+    navegador. Checkout Sessions (a diferencia del PaymentIntent viejo)
+    exige que el frontend llame actions.updateEmail(...) antes de
+    actions.confirm() o tira "An email address is required..." -
+    confirmado con un error real de Stripe. Por eso ademas de mandarlo aca,
+    /web/status y /web/chat devuelven "email" para que landing.py se lo
+    pase a updateEmail() (ver montarStripe en LANDING_HTML_EN).
 
     ui_mode="elements" (no "embedded"): es el unico modo compatible con el
     Currency Selector Element que requiere Adaptive Pricing, y el que deja
@@ -72,6 +83,21 @@ async def create_checkout_session(amount: float, currency: str, session_id: str,
     (ver log agregado abajo). Si Adaptive Pricing no aparece solo con el
     toggle de cuenta, retomar esto."""
     amount_cents = int(round(amount * 100))
+    data = {
+        "mode": "payment",
+        "ui_mode": "elements",
+        "line_items[0][price_data][currency]": currency.lower(),
+        "line_items[0][price_data][product_data][name]": description,
+        "line_items[0][price_data][unit_amount]": amount_cents,
+        "line_items[0][quantity]": 1,
+        "return_url": f"{BASE_URL}/pago-exitoso/web/{session_id}",
+        # metadata.session_id es como el webhook (checkout.session.completed)
+        # recupera a que pedido de web_orders corresponde - mismo rol que
+        # custom_id en PayPal / metadata.session_id en el PaymentIntent viejo.
+        "metadata[session_id]": session_id,
+    }
+    if customer_email:
+        data["customer_email"] = customer_email
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
             f"{STRIPE_BASE_URL}/checkout/sessions",
@@ -79,20 +105,7 @@ async def create_checkout_session(amount: float, currency: str, session_id: str,
                 "Authorization": f"Bearer {STRIPE_SECRET}",
                 "Stripe-Version": STRIPE_API_VERSION,
             },
-            data={
-                "mode": "payment",
-                "ui_mode": "elements",
-                "line_items[0][price_data][currency]": currency.lower(),
-                "line_items[0][price_data][product_data][name]": description,
-                "line_items[0][price_data][unit_amount]": amount_cents,
-                "line_items[0][quantity]": 1,
-                "return_url": f"{BASE_URL}/pago-exitoso/web/{session_id}",
-                # metadata.session_id es como el webhook (checkout.session.completed)
-                # recupera a que pedido de web_orders corresponde - mismo rol
-                # que custom_id en PayPal / metadata.session_id en el
-                # PaymentIntent viejo.
-                "metadata[session_id]": session_id,
-            },
+            data=data,
         )
         if resp.status_code >= 400:
             # Stripe manda el motivo real del rechazo en el cuerpo (ej.
