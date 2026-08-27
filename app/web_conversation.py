@@ -20,8 +20,9 @@ from app.claude_client import (
     WEB_CONTENT_TOOLS,
     WEB_CONTENT_TOOLS_EN,
 )
-from app.config import BASE_URL, get_precio_pais, USD_TO_MXN_RATE
+from app.config import BASE_URL, get_precio_pais
 from app.dlocal_client import create_payment
+from app.fx_client import get_usd_to_mxn_rate
 from app.stripe_client import create_checkout_session
 
 log = logging.getLogger("cancion-bot")
@@ -82,11 +83,20 @@ async def crear_link_pago(session_id: str, order: dict, precio: dict, customer_e
         # esa funcion exige que la moneda del precio coincida con una
         # moneda de liquidacion real de la cuenta, y la cuenta de Diego solo
         # tiene MXN configurado. Es Adaptive Pricing el que despues le
-        # ofrece a un cliente de EE.UU. la opcion de pagar en dolares (ver
-        # USD_TO_MXN_RATE en config.py para el detalle completo/la
-        # consecuencia de que el monto en USD ya no sea un numero fijo).
+        # ofrece a un cliente de EE.UU. la opcion de pagar en dolares.
+        #
+        # La tasa se consulta en vivo (ver app/fx_client.py) en vez de usar
+        # un numero fijo - la primera version usaba USD_TO_MXN_RATE=18.5
+        # puesto "al aire" sin verificar, y la tasa real del dia resulto ser
+        # ~16.93 - una diferencia de mas de $2 USD de mas por pedido cuando
+        # Adaptive Pricing convertia de vuelta a dolares. Con la tasa en
+        # vivo, el monto en pesos que arma aca siempre corresponde al
+        # precio en USD que se promociona, dentro de lo razonable (Stripe
+        # de todas formas hace su propia conversion final al momento del
+        # pago, con su propia comision del 2-4% que paga el cliente).
+        tasa = await get_usd_to_mxn_rate()
         payment = await create_checkout_session(
-            amount=round(precio["amount"] * USD_TO_MXN_RATE, 2),
+            amount=round(precio["amount"] * tasa, 2),
             currency="mxn",
             session_id=session_id,
             description=descripcion,
