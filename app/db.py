@@ -195,6 +195,15 @@ MIGRATIONS = [
     # redireccion - no hay "payment_url" que guardar, en su lugar se guarda
     # el client_secret que el frontend usa para montar el Payment Element.
     "ALTER TABLE web_orders ADD COLUMN stripe_client_secret TEXT",
+    # ago 2026: precio en MXN por IP para la landing en ingles (ver
+    # get_precio_en_mx/resolve_precio_orden en config.py) - NULL para el
+    # caso normal (USD), "mx_en" cuando Cloudflare detecto al visitante en
+    # Mexico al crear la sesion (ver /web/session en main.py). Se guarda en
+    # vez de solo confiar en country="US" para que cualquier recalculo
+    # posterior del precio (aprobar letra, recuperar pedido por correo)
+    # siga cobrando exactamente lo mismo que se le mostro al inicio, sin
+    # importar si el visitante cambio de red/IP a mitad de la charla.
+    "ALTER TABLE web_orders ADD COLUMN price_override TEXT",
 ]
 
 
@@ -617,6 +626,7 @@ def create_web_order(
     utm_content: str | None = None,
     utm_term: str | None = None,
     gclid: str | None = None,
+    price_override: str | None = None,
 ):
     now = datetime.utcnow().isoformat()
     with get_conn() as conn:
@@ -626,12 +636,13 @@ def create_web_order(
                 (session_id, email, step, messages, source, country, currency,
                  fbclid, fbp, client_ip, client_user_agent, language, tier,
                  utm_source, utm_medium, utm_campaign, utm_content, utm_term, gclid,
-                 created_at, updated_at)
-            VALUES (?, ?, 'charlando', '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 price_override, created_at, updated_at)
+            VALUES (?, ?, 'charlando', '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (session_id, email, source, country, currency,
              fbclid, fbp, client_ip, client_user_agent, language, tier,
-             utm_source, utm_medium, utm_campaign, utm_content, utm_term, gclid, now, now),
+             utm_source, utm_medium, utm_campaign, utm_content, utm_term, gclid,
+             price_override, now, now),
         )
 
 

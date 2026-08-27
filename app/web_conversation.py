@@ -20,7 +20,7 @@ from app.claude_client import (
     WEB_CONTENT_TOOLS,
     WEB_CONTENT_TOOLS_EN,
 )
-from app.config import BASE_URL, get_precio_pais
+from app.config import BASE_URL, resolve_precio_orden
 from app.dlocal_client import create_payment
 from app.stripe_client import create_checkout_session
 
@@ -227,7 +227,9 @@ async def _buscar_pedido_por_correo(tool_input: dict, order: dict, resultado: di
         # haber expirado o el pago haber sido rechazado. Se genera uno
         # fresco antes de mandarlo de vuelta, para no devolverle un link
         # que ya no sirve.
-        precio_encontrado = get_precio_pais(encontrado.get("country"), encontrado.get("tier", "song"))
+        precio_encontrado = resolve_precio_orden(
+            encontrado.get("country"), encontrado.get("tier", "song"), encontrado.get("price_override")
+        )
         try:
             await crear_link_pago(found_session_id, encontrado, precio_encontrado)
         except Exception:
@@ -272,7 +274,7 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
     if not order:
         raise ValueError(f"No existe una sesion web con id {session_id}")
 
-    precio = get_precio_pais(order.get("country"), order.get("tier", "song"))
+    precio = resolve_precio_orden(order.get("country"), order.get("tier", "song"), order.get("price_override"))
     language = order.get("language", "es")
 
     if order["step"] != "charlando":

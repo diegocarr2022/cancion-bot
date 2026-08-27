@@ -933,8 +933,8 @@ ___GOOGLE_ADS_SCRIPT___
     <p class="sub">The most unique gift you'll ever give - a real song written and sung from your story. You approve every lyric before you pay a cent.</p>
 
     <div class="price-row">
-      <span class="price-was">___PRECIO_BADGE_WAS___</span>
-      <span class="price-now">___PRECIO_BADGE___</span>
+      <span class="price-was">___PRECIO_BADGE_WAS_DYNAMIC___</span>
+      <span class="price-now">___PRECIO_BADGE_DYNAMIC___</span>
       <span class="price-label">launch price</span>
     </div>
 
@@ -1006,7 +1006,7 @@ ___GOOGLE_ADS_SCRIPT___
       <p style="margin-top:0;">✅ Your lyrics are ready! Pay below to start recording - no need to leave this page.</p>
       <div id="stripe-currency-selector"></div>
       <div id="stripe-payment-element"><span class="spinner"></span>Setting up your payment...</div>
-      <button id="btn-pagar" type="button">Pay ___PRECIO_BADGE___ &amp; Create My Song</button>
+      <button id="btn-pagar" type="button">Pay ___PRECIO_BADGE_DYNAMIC___ &amp; Create My Song</button>
       <p id="stripe-error"></p>
     </div>
 
@@ -1086,7 +1086,7 @@ ___GOOGLE_ADS_SCRIPT___
     <div class="note"><p class="note-q">How fast will it actually arrive?</p><p class="note-a">Usually within a few minutes of paying. It shows up right on this page, plus a backup copy by email.</p></div>
     <div class="note"><p class="note-q">Is it really one-of-a-kind?</p><p class="note-a">Yes — every song is written from scratch, based on your story. No templates, no stock lyrics, no reused lines.</p></div>
     <div class="note"><p class="note-q">Is this AI-generated?</p><p class="note-a">Yes — the music and vocals are composed by AI from the story you give us, and you write the details together with our writer in the chat. You approve the lyrics before anything is produced. It's surprisingly good at capturing a real story - that's the whole idea.</p></div>
-    <div class="note"><p class="note-q">What does it cost?</p><p class="note-a">___PRECIO_BADGE___ for a limited launch window (see the price above). You only pay once you've approved the lyrics.</p></div>
+    <div class="note"><p class="note-q">What does it cost?</p><p class="note-a">___PRECIO_BADGE_DYNAMIC___ for a limited launch window (see the price above). You only pay once you've approved the lyrics.</p></div>
   </section>
 
   <footer>
@@ -1182,7 +1182,7 @@ async function confirmarPagoStripe() {
       errBox.textContent = mensaje || "Something went wrong - please try again.";
       errBox.style.display = "block";
       btn.disabled = false;
-      btn.textContent = "Pay ___PRECIO_BADGE___ & Create My Song";
+      btn.textContent = "Pay ___PRECIO_BADGE_DYNAMIC___ & Create My Song";
       return;
     }
   } catch (e) {
@@ -1190,7 +1190,7 @@ async function confirmarPagoStripe() {
     errBox.textContent = (e && e.message) || "Something went wrong - please try again.";
     errBox.style.display = "block";
     btn.disabled = false;
-    btn.textContent = "Pay ___PRECIO_BADGE___ & Create My Song";
+    btn.textContent = "Pay ___PRECIO_BADGE_DYNAMIC___ & Create My Song";
     return;
   }
   // El pago quedo aprobado del lado del navegador, pero la confirmacion REAL
@@ -1428,3 +1428,11 @@ LANDING_HTML_EN = LANDING_HTML_EN.replace("___BRAND___", BRAND_NAME_EN)
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___STRIPE_PUBLISHABLE_KEY___", STRIPE_API_KEY)
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___PRECIO_BADGE_WAS___", _PRECIO_BADGE_WAS_EN)
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___PRECIO_BADGE___", _PRECIO_BADGE_EN)
+
+# ___PRECIO_BADGE_DYNAMIC___/___PRECIO_BADGE_WAS_DYNAMIC___ (badge, boton,
+# FAQ, JS) quedan A PROPOSITO sin resolver aca - los sustituye /cancion en
+# main.py, por request, segun el pais detectado via CF-IPCountry (ver
+# get_precio_en_mx en config.py). Estos alias publicos son el valor default
+# (USD, mismo que ya se usaba antes) para cuando main.py no detecta Mexico.
+PRECIO_BADGE_EN = _PRECIO_BADGE_EN
+PRECIO_BADGE_WAS_EN = _PRECIO_BADGE_WAS_EN

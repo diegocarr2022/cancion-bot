@@ -142,6 +142,61 @@ def get_precio_pais(country_code: str | None, tier: str = "song") -> dict:
         "texto": datos_tier["texto"],
     }
 
+
+# --- Precio en pesos para visitantes en Mexico en la landing en ingles ---
+# ago 2026: tunecraft.studio esta detras de Cloudflare, que manda gratis el
+# pais real del visitante en el header CF-IPCountry (sin llamar a ningun
+# servicio externo de geolocalizacion, sin limite de rate) - ver su uso en
+# main.py (/cancion y /web/session). Un visitante que entra a la landing en
+# INGLES y es detectado en Mexico ve/paga este precio en MXN en vez del USD
+# normal - mismo patron que ya usa al menos un competidor investigado
+# (songlygift.com: precio redondo en pesos mostrado directo, no una
+# conversion). A diferencia de Adaptive Pricing de Stripe (se probo y se
+# revirtio antes, ver el comentario largo en crear_link_pago en
+# web_conversation.py): esto es un tipo de cambio FIJO que Diego controla a
+# mano (no uno de mercado en vivo, y no pasa por el servicio de conversion
+# de Stripe con su comision de 2-4%) - el Checkout Session se crea directo
+# en MXN por este monto ya fijado, sin conversion de por medio. El pais de
+# la orden en si (gateway=Stripe, "US") NO cambia con esto - solo la
+# moneda/monto que se muestra y se cobra.
+PRECIO_TIPO_CAMBIO_MXN_EN = float(os.environ.get("PRECIO_TIPO_CAMBIO_MXN_EN", "17"))
+
+
+def get_precio_en_mx(tier: str = "song") -> dict:
+    """Precio en MXN para un visitante de la landing en ingles detectado en
+    Mexico - se deriva automaticamente del precio en USD vigente (respeta
+    precio de lanzamiento vs. regular, ver get_precio_pais/_precio_lanzamiento_vigente
+    arriba) multiplicado por PRECIO_TIPO_CAMBIO_MXN_EN, redondeado a un
+    numero entero limpio (sin centavos, como el resto de precios de
+    Tunecraft)."""
+    precio_usd = get_precio_pais("US", tier)
+    monto = round(precio_usd["amount"] * PRECIO_TIPO_CAMBIO_MXN_EN)
+    return {"currency": "MXN", "amount": float(monto), "texto": f"${monto:,} MXN"}
+
+
+def get_precio_en_mx_was() -> str:
+    """Version 'tachada' (precio regular, antes del descuento de
+    lanzamiento) del precio en MXN de arriba - solo para el badge de
+    descuento de la landing en ingles cuando se le muestra el precio en
+    pesos a un visitante detectado en Mexico."""
+    monto = round(PRECIO_USD_SONG_REGULAR * PRECIO_TIPO_CAMBIO_MXN_EN)
+    return f"${monto:,} MXN"
+
+
+def resolve_precio_orden(country_code: str | None, tier: str = "song", price_override: str | None = None) -> dict:
+    """Envoltorio sobre get_precio_pais que respeta el override de precio de
+    una orden YA CREADA (ver columna price_override en web_orders, db.py).
+    Usar esta funcion (no get_precio_pais directo) en cualquier punto que
+    recalcule el precio de una orden en curso (finalizar letra, recuperar
+    pedido por correo, etc.) para que nunca se desincronice del precio que
+    ya se le mostro/cobro originalmente en /web/session - la razon completa
+    de por que esto importa esta en el comentario sobre Adaptive Pricing en
+    crear_link_pago (web_conversation.py)."""
+    if price_override == "mx_en":
+        return get_precio_en_mx(tier)
+    return get_precio_pais(country_code, tier)
+
+
 # Tu chat_id de Telegram (el del administrador). Se usa para el comando
 # /confirmar de respaldo (por si el webhook de dLocal Go fallara) y para que
 # te avisen de pedidos nuevos. Lo obtienes hablandole a @userinfobot en Telegram.

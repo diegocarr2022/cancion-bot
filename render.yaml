@@ -96,6 +96,8 @@ services:
         sync: false
       - key: PRECIO_TEXTO_USD_SONG_REGULAR
         sync: false
+      - key: PRECIO_TIPO_CAMBIO_MXN_EN
+        sync: false
       - key: ENABLE_VIDEO_TIER
         sync: false
       - key: MEDIA_DIR

@@ -21,6 +21,9 @@ from app.config import (
     ADMIN_CHAT_ID,
     ADMIN_PANEL_PASSWORD,
     get_precio_pais,
+    get_precio_en_mx,
+    get_precio_en_mx_was,
+    resolve_precio_orden,
     POLL_INTERVAL_SECONDS,
     POLL_INTERVAL_STUCK_SECONDS,
     PENDING_PAYMENT_MAX_HORAS,
@@ -36,7 +39,14 @@ from app.config import (
 from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
 from app.email_client import enviar_cancion_por_correo, enviar_recordatorio_resena
-from app.landing import LANDING_HTML_ES, LANDING_HTML_EN, pixel_script, google_ads_script
+from app.landing import (
+    LANDING_HTML_ES,
+    LANDING_HTML_EN,
+    pixel_script,
+    google_ads_script,
+    PRECIO_BADGE_EN,
+    PRECIO_BADGE_WAS_EN,
+)
 from app.legal import TERMINOS_HTML, PRIVACIDAD_HTML, TERMS_HTML_EN, PRIVACY_HTML_EN
 from app.payment_confirm import confirmar_pago, confirmar_pago_web
 from app.pdf_client import build_lyrics_pdf
@@ -193,7 +203,7 @@ async def ir_a_telegram(source: str, request: Request):
 # instalar ninguna app. Ver app/landing.py y app/web_conversation.py.
 # ---------------------------------------------------------------------------
 @app.get("/cancion", response_class=HTMLResponse)
-async def cancion_landing(lang: str | None = None):
+async def cancion_landing(request: Request, lang: str | None = None):
     # ?lang=en/es en el link del anuncio decide el idioma - mismo mecanismo
     # que ?source=/?country= (ver iniciar() en landing.py). Sin el parametro,
     # /cancion es la URL historica en espanol (Telegram, enlaces viejos) -
@@ -201,7 +211,31 @@ async def cancion_landing(lang: str | None = None):
     # que navegadores en ingles vieran EN incluso entrando a /cancion sin
     # parametro - mismo bug que ya se habia corregido en la raiz "/").
     resolved_lang = (lang or "").strip().lower()
-    return LANDING_HTML_EN if resolved_lang == "en" else LANDING_HTML_ES
+    if resolved_lang != "en":
+        return LANDING_HTML_ES
+
+    # ago 2026: badge de precio dinamico para Mexico en la landing en ingles
+    # (ver PRECIO_TIPO_CAMBIO_MXN_EN en config.py) - LANDING_HTML_EN deja
+    # ___PRECIO_BADGE_DYNAMIC___/___PRECIO_BADGE_WAS_DYNAMIC___ sin resolver
+    # a proposito (a diferencia de ___PRECIO_BADGE___, que se resuelve una
+    # sola vez al importar el modulo para el meta/og/JSON-LD, que no varia
+    # por visitante) para poder sustituirlos aca, por request, con el MISMO
+    # precio que despues se cobra de verdad en /web/session - nunca deben
+    # desincronizarse (ver resolve_precio_orden en config.py).
+    detected_country = (request.headers.get("cf-ipcountry") or "").strip().upper()
+    if detected_country == "MX":
+        precio_mx = get_precio_en_mx("song")
+        badge = precio_mx["texto"]
+        badge_was = get_precio_en_mx_was()
+    else:
+        badge = PRECIO_BADGE_EN
+        badge_was = PRECIO_BADGE_WAS_EN
+
+    return (
+        LANDING_HTML_EN
+        .replace("___PRECIO_BADGE_DYNAMIC___", badge)
+        .replace("___PRECIO_BADGE_WAS_DYNAMIC___", badge_was)
+    )
 
 
 
@@ -263,6 +297,19 @@ async def web_session(request: Request):
 
     precio = get_precio_pais(country_code, tier)
 
+    # ago 2026: landing en ingles + visitante detectado en Mexico -> precio
+    # fijo en MXN en vez de USD (ver get_precio_en_mx/resolve_precio_orden
+    # en config.py). CF-IPCountry lo manda gratis Cloudflare (tunecraft.studio
+    # esta detras de su proxy) - no requiere ningun servicio externo de
+    # geolocalizacion. country_code se queda en "US" (gateway sigue siendo
+    # Stripe, tier sigue igual) - price_override es lo unico que cambia, y
+    # se guarda en la orden para que cualquier recalculo posterior del
+    # precio (aprobar letra, recuperar pedido) siga cobrando lo mismo.
+    detected_country = (request.headers.get("cf-ipcountry") or "").strip().upper()
+    price_override = "mx_en" if (lang == "en" and detected_country == "MX") else None
+    if price_override:
+        precio = get_precio_en_mx(tier)
+
     # fbclid/fbp: se leen del lado del navegador (landing.py, del URL y de la
     # cookie _fbp del propio Pixel de Meta) y se mandan aca para poder
     # reenviarselos a Meta en el evento Purchase server-side cuando se
@@ -291,10 +338,13 @@ async def web_session(request: Request):
         language=lang, tier=tier,
         utm_source=utm_source, utm_medium=utm_medium, utm_campaign=utm_campaign,
         utm_content=utm_content, utm_term=utm_term, gclid=gclid,
+        price_override=price_override,
     )
     log.info(
-        "[web] nueva sesion %s (source=%s, country=%s, currency=%s, lang=%s, tier=%s)",
+        "[web] nueva sesion %s (source=%s, country=%s, currency=%s, lang=%s, tier=%s, "
+        "detected_country=%s, price_override=%s)",
         session_id, source, country_code, precio["currency"], lang, tier,
+        detected_country, price_override,
     )
     return {"session_id": session_id}
 
@@ -424,7 +474,7 @@ async def pago_exitoso_web(session_id: str):
             # mismos en el momento) no necesita esperar al bot ni a un
             # webhook, se resuelve aca directo.
             try:
-                precio = get_precio_pais(order.get("country"), order.get("tier", "song"))
+                precio = resolve_precio_orden(order.get("country"), order.get("tier", "song"), order.get("price_override"))
                 await crear_link_pago(session_id, order, precio)
                 order = db.get_web_order(session_id) or order
                 await send_message(
