@@ -155,16 +155,29 @@ TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 # por seguridad (nunca lo dejamos abierto por defecto).
 ADMIN_PANEL_PASSWORD = os.environ.get("ADMIN_PANEL_PASSWORD", "")
 
-# --- Gmail (envio de la cancion por correo, para los pedidos de la landing web) ---
-# GMAIL_USER: la cuenta de Gmail/Workspace desde la que se manda el correo.
-# GMAIL_APP_PASSWORD: una "contraseña de aplicacion" generada en la
-# configuracion de seguridad de esa cuenta de Google (NO la contraseña
-# normal - Gmail no acepta la contraseña normal para SMTP de apps externas).
-# Si no se configuran, el envio de correo se salta silenciosamente (se loguea
-# una advertencia) - el link de descarga sigue apareciendo en el chat web de
-# todas formas, asi que no bloquea la entrega.
-GMAIL_USER = os.environ.get("GMAIL_USER", "")
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+# --- Mailgun (envio de la cancion por correo, para los pedidos de la landing
+# web) ---
+# ago 2026: reemplaza a Gmail SMTP - Diego no tiene el dominio
+# tunecraft.studio conectado a una cuenta de Gmail/Workspace, y Gmail SMTP
+# tampoco esta pensado para correo transaccional automatizado de un negocio
+# real (limite bajo, riesgo de que lo marquen como sospechoso). Mailgun
+# permite mandar desde una direccion del dominio propio sin necesitar un
+# buzon de correo real - solo verificar el dominio con unos registros DNS.
+# MAILGUN_API_KEY: se genera en app.mailgun.com -> Sending -> Domain
+# settings -> API keys. ES SECRETA.
+# MAILGUN_DOMAIN: el dominio (o subdominio, ej. "mg.tunecraft.studio") que
+# se verifico en Mailgun con esos registros DNS. No es secreto.
+# MAILGUN_FROM_EMAIL: la direccion completa que va a ver el cliente como
+# remitente, ej. "Tunecraft <hello@mg.tunecraft.studio>" - tiene que ser
+# una direccion del MAILGUN_DOMAIN de arriba (Mailgun no deja mandar "from"
+# de un dominio que no verificaste). Si no se configura, se arma un default
+# razonable a partir de MAILGUN_DOMAIN (ver email_client.py).
+# Si no se configuran API_KEY/DOMAIN, el envio de correo se salta
+# silenciosamente (se loguea una advertencia) - el link de descarga sigue
+# apareciendo en el chat web de todas formas, asi que no bloquea la entrega.
+MAILGUN_API_KEY = os.environ.get("MAILGUN_API_KEY", "")
+MAILGUN_DOMAIN = os.environ.get("MAILGUN_DOMAIN", "")
+MAILGUN_FROM_EMAIL = os.environ.get("MAILGUN_FROM_EMAIL", "")
 
 # --- Intervalo de los loops de fondo (segundos) ---
 # Subidos temporalmente (de 20/30s a 60/90s por default) mientras se

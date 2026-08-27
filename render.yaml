@@ -28,9 +28,11 @@ services:
         sync: false
       - key: BASE_URL
         sync: false
-      - key: GMAIL_USER
+      - key: MAILGUN_API_KEY
         sync: false
-      - key: GMAIL_APP_PASSWORD
+      - key: MAILGUN_DOMAIN
+        sync: false
+      - key: MAILGUN_FROM_EMAIL
         sync: false
       - key: DLOCAL_API_KEY
         sync: false

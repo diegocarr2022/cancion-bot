@@ -1,40 +1,45 @@
 """
 Envio del correo de entrega para los pedidos que vienen de la landing web
-(/cancion). Usa Gmail por SMTP con una "contraseña de aplicacion" (no la
-contraseña normal de la cuenta - Gmail la rechaza para SMTP de terceros).
+(/cancion). Usa la API de Mailgun (ago 2026, reemplaza a Gmail SMTP - ver
+MAILGUN_API_KEY en config.py para el motivo) - httpx crudo, mismo patron
+que el resto del repo (dlocal_client.py, stripe_client.py, etc.), sin el
+SDK oficial.
 
 Se manda como respaldo/comprobante - el link de descarga YA aparece directo
 en el chat de la landing en cuanto la cancion esta lista (ver /web/status en
 main.py); el correo es para quien cierra la pestaña o quiere guardarlo.
-
-smtplib es sincronico (bloqueante) - lo corremos en un hilo aparte
-(asyncio.to_thread) para no trabar el event loop de FastAPI mientras se
-manda.
 """
-import asyncio
 import logging
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 
-from app.config import GMAIL_USER, GMAIL_APP_PASSWORD, BRAND_NAME_EN
+import httpx
+
+from app.config import MAILGUN_API_KEY, MAILGUN_DOMAIN, MAILGUN_FROM_EMAIL, BRAND_NAME_EN
 
 log = logging.getLogger("cancion-bot")
 
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 465
+MAILGUN_BASE_URL = "https://api.mailgun.net/v3"
 
 
-def _enviar_sync(destinatario: str, asunto: str, cuerpo_html: str):
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = asunto
-    msg["From"] = GMAIL_USER
-    msg["To"] = destinatario
-    msg.attach(MIMEText(cuerpo_html, "html", "utf-8"))
+def _from_email() -> str:
+    """MAILGUN_FROM_EMAIL si Diego lo configuro explicito, si no un default
+    razonable armado con el dominio verificado - Mailgun rechaza mandar
+    desde una direccion que no sea de un dominio que verificaste ahi."""
+    return MAILGUN_FROM_EMAIL or f"{BRAND_NAME_EN} <noreply@{MAILGUN_DOMAIN}>"
 
-    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=30) as server:
-        server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-        server.sendmail(GMAIL_USER, [destinatario], msg.as_string())
+
+async def _enviar_async(destinatario: str, asunto: str, cuerpo_html: str):
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            f"{MAILGUN_BASE_URL}/{MAILGUN_DOMAIN}/messages",
+            auth=("api", MAILGUN_API_KEY),  # "api" es literal, no un placeholder - asi lo pide Mailgun
+            data={
+                "from": _from_email(),
+                "to": destinatario,
+                "subject": asunto,
+                "html": cuerpo_html,
+            },
+        )
+        resp.raise_for_status()
 
 
 async def enviar_cancion_por_correo(
@@ -44,9 +49,9 @@ async def enviar_cancion_por_correo(
     """Devuelve True si se mando (o si no hay credenciales configuradas, para
     no bloquear el flujo), False si hubo un error real intentando mandarlo.
     language: "es" (MX/PE/CO) o "en" (EE.UU. - ver expansion ago 2026)."""
-    if not GMAIL_USER or not GMAIL_APP_PASSWORD:
+    if not MAILGUN_API_KEY or not MAILGUN_DOMAIN:
         log.warning(
-            "GMAIL_USER/GMAIL_APP_PASSWORD no configurados - se omite el correo de "
+            "MAILGUN_API_KEY/MAILGUN_DOMAIN no configurados - se omite el correo de "
             "entrega para %s (el link ya quedo disponible en el chat web).",
             destinatario,
         )
@@ -89,7 +94,7 @@ async def enviar_cancion_por_correo(
         asunto = f"🎵 Tu canción personalizada: {titulo}"
 
     try:
-        await asyncio.to_thread(_enviar_sync, destinatario, asunto, cuerpo_html)
+        await _enviar_async(destinatario, asunto, cuerpo_html)
         return True
     except Exception:
         log.exception("Error mandando el correo de entrega a %s", destinatario)
@@ -102,9 +107,9 @@ async def enviar_recordatorio_resena(destinatario: str, titulo: str, review_url:
     principal es en el momento de la entrega, esto es solo el recordatorio
     si no reacciono ahi). Solo existe en ingles - Trustpilot es
     especificamente relevante para EE.UU."""
-    if not GMAIL_USER or not GMAIL_APP_PASSWORD:
+    if not MAILGUN_API_KEY or not MAILGUN_DOMAIN:
         log.warning(
-            "GMAIL_USER/GMAIL_APP_PASSWORD no configurados - se omite el "
+            "MAILGUN_API_KEY/MAILGUN_DOMAIN no configurados - se omite el "
             "recordatorio de reseña para %s.", destinatario,
         )
         return False
@@ -121,7 +126,7 @@ async def enviar_recordatorio_resena(destinatario: str, titulo: str, review_url:
     asunto = f"💛 How did \"{titulo}\" turn out?"
 
     try:
-        await asyncio.to_thread(_enviar_sync, destinatario, asunto, cuerpo_html)
+        await _enviar_async(destinatario, asunto, cuerpo_html)
         return True
     except Exception:
         log.exception("Error mandando el recordatorio de reseña a %s", destinatario)
@@ -133,9 +138,9 @@ async def enviar_video_por_correo(destinatario: str, titulo: str, video_url: str
     de la cancion porque el video puede terminar bastante despues (el render
     arranca recien cuando el cliente sube las fotos, que puede ser minutos u
     horas despues de que ya se mando el correo del audio)."""
-    if not GMAIL_USER or not GMAIL_APP_PASSWORD:
+    if not MAILGUN_API_KEY or not MAILGUN_DOMAIN:
         log.warning(
-            "GMAIL_USER/GMAIL_APP_PASSWORD no configurados - se omite el correo de "
+            "MAILGUN_API_KEY/MAILGUN_DOMAIN no configurados - se omite el correo de "
             "video para %s.", destinatario,
         )
         return False
@@ -158,7 +163,7 @@ async def enviar_video_por_correo(destinatario: str, titulo: str, video_url: str
         asunto = f"🎬 Tu video ya está listo: {titulo}"
 
     try:
-        await asyncio.to_thread(_enviar_sync, destinatario, asunto, cuerpo_html)
+        await _enviar_async(destinatario, asunto, cuerpo_html)
         return True
     except Exception:
         log.exception("Error mandando el correo de video a %s", destinatario)
