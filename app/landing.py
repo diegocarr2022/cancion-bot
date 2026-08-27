@@ -1095,11 +1095,16 @@ async function montarStripe(clientSecret, email) {
   if (!stripeInstance) stripeInstance = Stripe(STRIPE_PUBLISHABLE_KEY);
   const errBox = $("stripe-error");
   try {
+    // Se probo Adaptive Pricing (cobrar en MXN, dejar que Stripe le
+    // ofreciera dolares al cliente de EE.UU.) y se revirtio - el cliente
+    // real terminaba pagando siempre un poco mas del precio anunciado por
+    // la comision de conversion (2-4%), riesgo de publicidad enganosa. Se
+    // volvio a cobrar en USD tal cual (ver web_conversation.crear_link_pago) -
+    // adaptivePricing:{allowed:true} se deja puesto solo porque no hace
+    // ningun dano dejarlo (sin adaptive_pricing[enabled] del lado del
+    // servidor, esto no activa nada).
     checkoutInstance = await stripeInstance.initCheckoutElementsSdk({
       clientSecret,
-      // Requisito de Stripe: mostrar el Currency Selector Element si se
-      // usa Adaptive Pricing (ver adaptive_pricing[enabled] en
-      // stripe_client.create_checkout_session) - no es opcional/decorativo.
       adaptivePricing: {allowed: true},
     });
     // Checkout Sessions exige el correo ANTES de poder confirmar

@@ -76,25 +76,24 @@ async def create_checkout_session(
     already set" - por eso montarStripe() en LANDING_HTML_EN
     deliberadamente NO llama updateEmail(), solo confia en este parametro.
 
-    ui_mode="elements" (no "embedded"): es el unico modo compatible con el
-    Currency Selector Element que requiere Adaptive Pricing, y el que deja
-    montar el Payment Element donde queramos en la pagina en vez de la caja
-    preconstruida de Stripe. return_url es obligatorio aunque en este modo
-    casi nunca se llega a usar (solo si el cliente elige un metodo de pago
-    que si redirige, ej. algun banco) - reusa la misma pagina de retorno que
-    ya existe para PayPal.
+    ui_mode="elements" (no "embedded"): el modo que deja montar el Payment
+    Element donde queramos en la pagina en vez de la caja preconstruida de
+    Stripe (y el que se necesita para Amex - ver STRIPE_API_VERSION mas
+    arriba). return_url es obligatorio aunque en este modo casi nunca se
+    llega a usar (solo si el cliente elige un metodo de pago que si
+    redirige, ej. algun banco) - reusa la misma pagina de retorno que ya
+    existe para PayPal.
 
-    Adaptive Pricing se activo a nivel cuenta en el dashboard
-    (dashboard.stripe.com/settings/adaptive-pricing, hecho por Diego).
-    adaptive_pricing[enabled]=true se manda ADEMAS por sesion aca abajo -
-    la primera vez que se probo dio 400 Bad Request, pero resulto ser
-    colateral del problema de version de API (ui_mode="elements", ya
-    arreglado con STRIPE_API_VERSION) que tumbaba la sesion ENTERA, no un
-    rechazo real de este parametro especifico - nunca se llego a confirmar
-    si el parametro en si era invalido. Sin el, la sesion no ofrecia ningun
-    currencyOptions ni mostraba el Currency Selector Element con una
-    tarjeta mexicana real (deberia haberlo hecho - MX esta en la lista de
-    paises soportados por Adaptive Pricing)."""
+    NO se manda adaptive_pricing (a proposito): se probo cobrar en MXN y
+    dejar que Adaptive Pricing le ofreciera dolares al cliente de EE.UU.,
+    pero se revirtio - la comision de conversion (2-4%) la paga justo quien
+    elige pagar en dolares, asi que el cliente real (EE.UU.) terminaba
+    pagando siempre un poco mas del precio anunciado, mientras el caso raro
+    (tarjeta mexicana pagando en pesos, sin conversion) no pagaba de mas -
+    riesgo real de publicidad enganosa. Se cobra en USD tal cual, sin
+    conversion - las tarjetas mexicanas vuelven a quedar sin poder pagar en
+    este flujo (ver web_conversation.crear_link_pago para el detalle
+    completo de la decision)."""
     amount_cents = int(round(amount * 100))
     data = {
         "mode": "payment",
@@ -108,7 +107,6 @@ async def create_checkout_session(
         # recupera a que pedido de web_orders corresponde - mismo rol que
         # custom_id en PayPal / metadata.session_id en el PaymentIntent viejo.
         "metadata[session_id]": session_id,
-        "adaptive_pricing[enabled]": "true",
     }
     if customer_email:
         data["customer_email"] = customer_email

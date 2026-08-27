@@ -22,7 +22,6 @@ from app.claude_client import (
 )
 from app.config import BASE_URL, get_precio_pais
 from app.dlocal_client import create_payment
-from app.fx_client import get_usd_to_mxn_rate
 from app.stripe_client import create_checkout_session
 
 log = logging.getLogger("cancion-bot")
@@ -73,31 +72,26 @@ async def crear_link_pago(session_id: str, order: dict, precio: dict, customer_e
         # Stripe reemplaza a PayPal aca (checkout embebido, sin redireccion -
         # ver app/stripe_client.py). PayPal se queda en el codigo solo para
         # pedidos viejos que ya hayan quedado con gateway=="paypal".
-        # ago 2026: Checkout Sessions en vez de Payment Intents - habilita
-        # Adaptive Pricing (tarjetas de otros paises pagan en su propia
-        # moneda) y mejora la aceptacion de Amex, que fallaba antes de
-        # siquiera llegar a crear un intento de pago (ver plan).
-        #
-        # El precio que se le manda a Stripe va en MXN, NO en USD - decision
-        # de Diego, confirmada contra la documentacion de Adaptive Pricing:
-        # esa funcion exige que la moneda del precio coincida con una
-        # moneda de liquidacion real de la cuenta, y la cuenta de Diego solo
-        # tiene MXN configurado. Es Adaptive Pricing el que despues le
-        # ofrece a un cliente de EE.UU. la opcion de pagar en dolares.
-        #
-        # La tasa se consulta en vivo (ver app/fx_client.py) en vez de usar
-        # un numero fijo - la primera version usaba USD_TO_MXN_RATE=18.5
-        # puesto "al aire" sin verificar, y la tasa real del dia resulto ser
-        # ~16.93 - una diferencia de mas de $2 USD de mas por pedido cuando
-        # Adaptive Pricing convertia de vuelta a dolares. Con la tasa en
-        # vivo, el monto en pesos que arma aca siempre corresponde al
-        # precio en USD que se promociona, dentro de lo razonable (Stripe
-        # de todas formas hace su propia conversion final al momento del
-        # pago, con su propia comision del 2-4% que paga el cliente).
-        tasa = await get_usd_to_mxn_rate()
+        # ago 2026: Checkout Sessions en vez de Payment Intents - se probo
+        # tambien Adaptive Pricing (cobrar en MXN, dejar que Stripe le
+        # ofrezca dolares al cliente de EE.UU.) para intentar resolver
+        # tarjetas mexicanas Y mejorar la aceptacion de Amex a la vez, pero
+        # se revirtio: como la comision de conversion (2-4%) de Adaptive
+        # Pricing la paga justo el cliente que elige pagar en dolares, el
+        # cliente de EE.UU. (la audiencia real) terminaba pagando siempre
+        # un poco MAS de $27 mientras que el caso raro (tarjeta mexicana,
+        # pagando directo en pesos sin conversion) no pagaba de mas -
+        # exactamente al reves de lo que conviene, y con riesgo real de
+        # publicidad enganosa contra el precio anunciado. Se vuelve a cobrar
+        # en USD, tal cual el precio que se promociona - las tarjetas
+        # mexicanas vuelven a quedar sin poder pagar en este flujo (no son
+        # la audiencia objetivo), pero el cliente real paga exactamente lo
+        # anunciado, sin variacion. El fix de Amex (si funciona) viene de
+        # usar Checkout Sessions en si, no de en que moneda se cobra - ver
+        # STRIPE_API_VERSION en stripe_client.py.
         payment = await create_checkout_session(
-            amount=round(precio["amount"] * tasa, 2),
-            currency="mxn",
+            amount=precio["amount"],
+            currency=precio["currency"],
             session_id=session_id,
             description=descripcion,
             customer_email=customer_email,
