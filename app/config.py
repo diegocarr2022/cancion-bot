@@ -86,6 +86,26 @@ PAISES_SOPORTADOS = {
 }
 PAIS_DEFAULT = "MX"
 
+# --- Tipo de cambio USD->MXN (solo para el checkout de Stripe, EE.UU.) ---
+# ago 2026: Adaptive Pricing (deja pagar en dolares desde EE.UU., ver
+# stripe_client.create_checkout_session) exige que la moneda del precio
+# coincida con una moneda de liquidacion real de la cuenta de Stripe - la
+# cuenta de Diego solo tiene MXN configurado (una sola cuenta bancaria, en
+# pesos), asi que el precio que se le manda a Stripe para el checkout de
+# EE.UU. se arma en MXN (multiplicando el precio en USD por esta tasa), y
+# es el propio Adaptive Pricing el que le ofrece a un cliente de EE.UU. la
+# opcion de pagar en dolares - Stripe hace la conversion real con su tasa
+# del dia (garantizada por 24h). Consecuencia a tener en cuenta: lo que un
+# cliente de EE.UU. ve para pagar NO va a ser un numero fijo tipo "$27.00"
+# exacto todos los dias, va a variar un poco segun el tipo de cambio real -
+# la landing/anuncios siguen mostrando "$27 USD" como ancla de marketing,
+# pero el cobro real puede quedar en $26.87 o $27.14 dependiendo del dia.
+# Actualizar este valor de tanto en tanto para que no se desfase mucho del
+# tipo de cambio real (no hace falta que sea exacto - Stripe hace la
+# conversion fina al momento del cobro, esto solo evita que el precio base
+# en pesos quede muy lejos de la realidad).
+USD_TO_MXN_RATE = float(os.environ.get("USD_TO_MXN_RATE", "18.5"))
+
 # --- Precio de lanzamiento (EE.UU., tier "song") ---
 # Fecha CALENDARIO fija (no relativa al momento en que arranca el proceso -
 # ver _precio_lanzamiento_vigente) hasta la cual rige el precio de

@@ -20,7 +20,7 @@ from app.claude_client import (
     WEB_CONTENT_TOOLS,
     WEB_CONTENT_TOOLS_EN,
 )
-from app.config import BASE_URL, get_precio_pais
+from app.config import BASE_URL, get_precio_pais, USD_TO_MXN_RATE
 from app.dlocal_client import create_payment
 from app.stripe_client import create_checkout_session
 
@@ -76,9 +76,18 @@ async def crear_link_pago(session_id: str, order: dict, precio: dict, customer_e
         # Adaptive Pricing (tarjetas de otros paises pagan en su propia
         # moneda) y mejora la aceptacion de Amex, que fallaba antes de
         # siquiera llegar a crear un intento de pago (ver plan).
+        #
+        # El precio que se le manda a Stripe va en MXN, NO en USD - decision
+        # de Diego, confirmada contra la documentacion de Adaptive Pricing:
+        # esa funcion exige que la moneda del precio coincida con una
+        # moneda de liquidacion real de la cuenta, y la cuenta de Diego solo
+        # tiene MXN configurado. Es Adaptive Pricing el que despues le
+        # ofrece a un cliente de EE.UU. la opcion de pagar en dolares (ver
+        # USD_TO_MXN_RATE en config.py para el detalle completo/la
+        # consecuencia de que el monto en USD ya no sea un numero fijo).
         payment = await create_checkout_session(
-            amount=precio["amount"],
-            currency=precio["currency"],
+            amount=round(precio["amount"] * USD_TO_MXN_RATE, 2),
+            currency="mxn",
             session_id=session_id,
             description=descripcion,
             customer_email=customer_email,
