@@ -150,8 +150,8 @@ _GOOGLE_ADS_SCRIPT = google_ads_script()
 
 # Pagina publica de "escuchar" (ago 2026) - lo que se abre cuando alguien le
 # da clic al link que un cliente comparte por WhatsApp/Facebook desde la
-# pantalla de entrega (ver mostrarCompartir() en LANDING_HTML_EN, y la ruta
-# /s/{session_id} en main.py). A proposito NO usa la plantilla completa de
+# pantalla de entrega (ver crearBotonesCompartir() en LANDING_HTML_EN, y la
+# ruta /s/{session_id}/{index} en main.py). A proposito NO usa la plantilla completa de
 # LANDING_HTML_EN (sin chat, sin precio, sin nada del funnel de venta) -
 # es solo una tarjeta con marca para que la cancion se sienta como un regalo
 # de Tunecraft, no como un link pelón de un CDN random. Diego decidio a
@@ -957,11 +957,14 @@ ___GOOGLE_ADS_SCRIPT___
   .descarga-item a { padding: 10px 20px; font-size: 14px; }
   .trust-badge { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; font-size: 12.5px; color: #8a7a6b; }
   .trust-badge svg { flex-shrink: 0; color: #8a7a6b; }
-  #share-buttons { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
-  .share-btn { display: inline-block; padding: 10px 18px; border-radius: 8px; font-weight: 600; font-size: 13.5px; text-decoration: none; color: #fff; }
-  .share-btn.whatsapp { background: #25d366; }
-  .share-btn.facebook { background: #1877f2; }
-  .share-btn.native { background: var(--rec); }
+  .share-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  /* Prefijado con #descarga-box para ganarle en especificidad a la regla
+     generica "#descarga-box a" de arriba (mismo selector de ID) - si no,
+     esta pisa el color/padding de cada boton y todos se ven igual de rojos. */
+  #descarga-box .share-btn { display: inline-block; margin-top: 0; padding: 9px 16px; border-radius: 8px; font-weight: 600; font-size: 13px; text-decoration: none; color: #fff; }
+  #descarga-box .share-btn.whatsapp { background: #25d366; }
+  #descarga-box .share-btn.facebook { background: #1877f2; }
+  #descarga-box .share-btn.native { background: var(--rec); border: none; font-family: inherit; cursor: pointer; }
   #stripe-currency-selector { text-align: left; margin-top: 14px; }
   #stripe-payment-element { text-align: left; margin-top: 10px; }
   #btn-pagar { display: inline-block; margin-top: 16px; padding: 15px 28px; background: var(--rec); color: #fff5ee; border: none; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; font-family: inherit; cursor: pointer; width: 100%; }
@@ -1136,10 +1139,6 @@ ___GOOGLE_ADS_SCRIPT___
       <p style="font-size:12px; color:var(--paper-ink-soft); margin-top:14px; margin-bottom:0;">
         We also sent it to your email as a backup.
       </p>
-      <div id="share-box" style="margin-top:18px; padding-top:16px; border-top:1px solid var(--line);">
-        <p style="margin:0 0 10px; font-size:14px;">💌 Want them (or someone else) to hear it right now?</p>
-        <div id="share-buttons"></div>
-      </div>
       ___REVIEW_BLOCK___
     </div>
   </section>
@@ -1444,10 +1443,10 @@ function mostrarDescarga(audioUrls, titulo) {
     const bloque = document.createElement("div");
     bloque.className = "descarga-item";
 
-    const titulo = document.createElement("p");
-    titulo.className = "descarga-item-titulo";
-    titulo.textContent = audioUrls.length > 1 ? ("Version " + (i + 1)) : "Your song";
-    bloque.appendChild(titulo);
+    const rotulo = document.createElement("p");
+    rotulo.className = "descarga-item-titulo";
+    rotulo.textContent = audioUrls.length > 1 ? ("Version " + (i + 1)) : "Your song";
+    bloque.appendChild(rotulo);
 
     const audio = document.createElement("audio");
     audio.controls = true; audio.src = url; audio.style.width = "100%";
@@ -1457,6 +1456,13 @@ function mostrarDescarga(audioUrls, titulo) {
     descargar.href = "/web/download-audio/" + encodeURIComponent(sessionId) + "/" + i;
     descargar.textContent = "⬇ Download this version";
     bloque.appendChild(descargar);
+
+    // Un boton de compartir POR VERSION (no uno solo para toda la pantalla)
+    // - con 2 tomas distintas, el cliente puede preferir una sobre la otra,
+    // y quien reciba el link tiene que escuchar justo ESA, no siempre la
+    // primera. Ver crearBotonesCompartir() abajo y /s/{session}/{i} en
+    // main.py (la pagina publica con marca, no el link crudo del CDN).
+    bloque.appendChild(crearBotonesCompartir(i, titulo, audioUrls.length > 1));
 
     cont.appendChild(bloque);
   });
@@ -1468,24 +1474,28 @@ function mostrarDescarga(audioUrls, titulo) {
   cont.appendChild(pdf);
   cont.appendChild(document.createElement("br"));
   $("descarga-box").style.display = "block";
-  mostrarCompartir(titulo);
 }
 
-// ago 2026: link a la pagina publica de escucha (ver render_share_page en
-// landing.py y /s/{session_id} en main.py) - a proposito NO es el link
-// directo al CDN de Suno (esa pagina tiene la marca de Tunecraft, un titulo
-// bonito y un boton de "haz una para alguien que quieras", convirtiendo
-// cada cancion compartida en publicidad gratis en vez de solo un link
-// pelon). navigator.share() (donde el navegador lo soporta, sobre todo
-// movil) abre el selector nativo del sistema con TODAS las apps instaladas,
-// no solo WhatsApp/Facebook - se ofrece como opcion principal, y los dos
-// botones explicitos quedan de respaldo para navegadores que no lo
-// soportan (sobre todo desktop).
-function mostrarCompartir(titulo) {
-  const shareUrl = window.location.origin + "/s/" + encodeURIComponent(sessionId);
-  const shareText = titulo ? ("Someone made me a song: \"" + titulo + "\" 🎵") : "Someone made me a song 🎵";
-  const cont = $("share-buttons");
-  cont.innerHTML = "";
+// ago 2026: botones de compartir para UNA version especifica (ver el
+// comentario en mostrarDescarga de por que es por-version). Apuntan a
+// /s/{session}/{i}, la pagina publica con marca de Tunecraft
+// (render_share_page en landing.py) - nunca al link crudo del CDN de Suno,
+// asi cada cancion compartida trae de vuelta la marca y un gancho de
+// "haz una para alguien que quieras" en vez de ser publicidad gratis para
+// el CDN. navigator.share() (donde el navegador lo soporta, sobre todo
+// movil) abre el selector nativo del sistema con TODAS las apps
+// instaladas, no solo WhatsApp/Facebook - se ofrece como opcion principal,
+// y los dos botones explicitos quedan de respaldo para navegadores que no
+// lo soportan (sobre todo desktop).
+function crearBotonesCompartir(index, titulo, multiplesVersiones) {
+  const shareUrl = window.location.origin + "/s/" + encodeURIComponent(sessionId) + "/" + index;
+  const etiquetaVersion = multiplesVersiones ? (" (version " + (index + 1) + ")") : "";
+  const shareText = titulo
+    ? ("Someone made me a song: \"" + titulo + "\"" + etiquetaVersion + " 🎵")
+    : "Someone made me a song 🎵";
+
+  const cont = document.createElement("div");
+  cont.className = "share-row";
 
   if (navigator.share) {
     const btnNativo = document.createElement("button");
@@ -1509,6 +1519,8 @@ function mostrarCompartir(titulo) {
   fb.href = "https://www.facebook.com/sharer/sharer.php?u=" + encodeURIComponent(shareUrl);
   fb.textContent = "Facebook";
   cont.appendChild(fb);
+
+  return cont;
 }
 
 function mostrarEscribiendo() {

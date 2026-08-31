@@ -501,28 +501,35 @@ async def web_download_audio(session_id: str, index: int):
     )
 
 
-@app.get("/s/{session_id}", response_class=HTMLResponse)
-async def share_song(session_id: str, response: Response):
+@app.get("/s/{session_id}/{index}", response_class=HTMLResponse)
+async def share_song(session_id: str, index: int, response: Response):
     """Pagina publica de escucha (ago 2026) - lo que abre alguien que recibio
     el link que un cliente comparte por WhatsApp/Facebook desde la pantalla
-    de entrega (ver mostrarCompartir() en landing.py). Publica a proposito,
-    sin pedir nada - session_id ya funciona como token no adivinable (mismo
-    criterio que /web/lyrics-pdf/{session_id}, que tampoco pide nada mas).
-    Solo expone titulo + audio (Diego decidio a proposito no mostrar
-    anecdotas/detalles privados del chat ni el correo - cualquiera con el
-    link puede abrir esto, no solo el cliente). X-Robots-Tag (ademas del
-    <meta name="robots"> que ya trae render_share_page): ninguna pagina de
-    sesion de un cliente en particular se debe indexar en buscadores - a
-    diferencia de /cancion o /, que SI queremos indexadas."""
+    de entrega (ver crearBotonesCompartir() en landing.py). Publica a
+    proposito, sin pedir nada - session_id ya funciona como token no
+    adivinable (mismo criterio que /web/lyrics-pdf/{session_id}, que
+    tampoco pide nada mas). Solo expone titulo + audio (Diego decidio a
+    proposito no mostrar anecdotas/detalles privados del chat ni el correo
+    - cualquiera con el link puede abrir esto, no solo el cliente).
+
+    index: cada version tiene su propio boton de compartir en la pantalla
+    de entrega (no un solo link generico) - asi quien recibe el link
+    escucha justo la version que el cliente eligio compartir, no siempre
+    la primera.
+
+    X-Robots-Tag (ademas del <meta name="robots"> que ya trae
+    render_share_page): ninguna pagina de sesion de un cliente en
+    particular se debe indexar en buscadores - a diferencia de /cancion o
+    /, que SI queremos indexadas."""
     response.headers["X-Robots-Tag"] = "noindex, nofollow"
     order = db.get_web_order(session_id)
     if not order or not order.get("delivered") or not order.get("audio_urls"):
         raise HTTPException(status_code=404, detail="Song not found")
     import json as _json
     audio_urls = _json.loads(order["audio_urls"])
-    if not audio_urls:
+    if index < 0 or index >= len(audio_urls):
         raise HTTPException(status_code=404, detail="Song not found")
-    return render_share_page(order.get("final_title"), audio_urls[0])
+    return render_share_page(order.get("final_title"), audio_urls[index])
 
 
 # ---------------------------------------------------------------------------
