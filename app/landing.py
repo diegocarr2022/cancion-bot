@@ -43,6 +43,8 @@ codigo compartido. main.py elige cual servir segun ?lang= en la URL o el
 header Accept-Language (ver /cancion en main.py).
 """
 
+import html
+
 from app.config import (
     META_PIXEL_ID,
     BRAND_NAME_EN,
@@ -145,6 +147,73 @@ gtag('js', new Date());
 
 
 _GOOGLE_ADS_SCRIPT = google_ads_script()
+
+# Pagina publica de "escuchar" (ago 2026) - lo que se abre cuando alguien le
+# da clic al link que un cliente comparte por WhatsApp/Facebook desde la
+# pantalla de entrega (ver mostrarCompartir() en LANDING_HTML_EN, y la ruta
+# /s/{session_id} en main.py). A proposito NO usa la plantilla completa de
+# LANDING_HTML_EN (sin chat, sin precio, sin nada del funnel de venta) -
+# es solo una tarjeta con marca para que la cancion se sienta como un regalo
+# de Tunecraft, no como un link pelón de un CDN random. Diego decidio a
+# proposito mostrar SOLO titulo + reproductor (nada de las anecdotas/detalles
+# privados que el cliente conto en el chat) porque cualquiera con el link
+# puede abrir esta pagina, no solo el cliente. Solo existe en ingles por
+# ahora, igual que el resto del funnel EN (Stripe/US) - el flujo ES/Telegram
+# no tiene equivalente todavia.
+def render_share_page(title: str | None, audio_url: str) -> str:
+    titulo_seguro = html.escape(title or "A Song Made With Tunecraft")
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{titulo_seguro} · {BRAND_NAME_EN}</title>
+<meta name="robots" content="noindex">
+<meta property="og:type" content="music.song">
+<meta property="og:title" content="{titulo_seguro}">
+<meta property="og:description" content="A real, personalized song - made with {BRAND_NAME_EN}. Give it a listen.">
+<meta name="twitter:card" content="summary">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,900&family=Caveat:wght@600&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {{
+    --ink: #16110d; --paper: #efe4cc; --amber: #e8a23a; --amber-bright: #f3b559;
+    --rec: #d14b3e; --ink-soft: #b7a88f; --line: rgba(239,228,204,0.14);
+  }}
+  * {{ box-sizing: border-box; }}
+  body {{
+    margin: 0; min-height: 100vh; background: var(--ink); color: var(--paper);
+    font-family: 'Work Sans', -apple-system, sans-serif; -webkit-font-smoothing: antialiased;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }}
+  .card {{ max-width: 420px; width: 100%; text-align: center; }}
+  .brand-row {{ display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 30px; }}
+  .brand-dot {{ width: 7px; height: 7px; border-radius: 50%; background: var(--rec); box-shadow: 0 0 8px var(--rec); }}
+  .brand-name {{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); }}
+  .eyebrow {{ font-family: 'Caveat', cursive; font-size: 20px; color: var(--amber-bright); display: inline-block; transform: rotate(-2deg); margin-bottom: 6px; }}
+  h1 {{ font-family: 'Fraunces', serif; font-variation-settings: 'opsz' 40; font-weight: 900; font-size: 32px; line-height: 1.15; text-wrap: balance; margin: 0 0 28px; }}
+  audio {{ width: 100%; margin-bottom: 32px; }}
+  .cta {{
+    display: inline-block; padding: 14px 26px; background: linear-gradient(135deg, var(--amber), var(--rec));
+    color: var(--ink); text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 14px;
+  }}
+  .footnote {{ margin-top: 22px; font-size: 12px; color: var(--ink-soft); }}
+  .footnote a {{ color: var(--ink-soft); }}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand-row"><span class="brand-dot"></span><span class="brand-name">{BRAND_NAME_EN}</span></div>
+    <span class="eyebrow">someone made this for you</span>
+    <h1>{titulo_seguro}</h1>
+    <audio controls src="{audio_url}"></audio>
+    <div><a class="cta" href="{BASE_URL}/">Make one like this →</a></div>
+    <p class="footnote">A real, sung song - written and produced with {BRAND_NAME_EN}.</p>
+  </div>
+</body>
+</html>
+"""
 
 # Pedido de reseña de Trustpilot, mostrado justo en la pantalla de descarga
 # (ver Diego: en el momento de la entrega, no dias despues por correo).
@@ -888,6 +957,11 @@ ___GOOGLE_ADS_SCRIPT___
   .descarga-item a { padding: 10px 20px; font-size: 14px; }
   .trust-badge { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; font-size: 12.5px; color: #8a7a6b; }
   .trust-badge svg { flex-shrink: 0; color: #8a7a6b; }
+  #share-buttons { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .share-btn { display: inline-block; padding: 10px 18px; border-radius: 8px; font-weight: 600; font-size: 13.5px; text-decoration: none; color: #fff; }
+  .share-btn.whatsapp { background: #25d366; }
+  .share-btn.facebook { background: #1877f2; }
+  .share-btn.native { background: var(--rec); }
   #stripe-currency-selector { text-align: left; margin-top: 14px; }
   #stripe-payment-element { text-align: left; margin-top: 10px; }
   #btn-pagar { display: inline-block; margin-top: 16px; padding: 15px 28px; background: var(--rec); color: #fff5ee; border: none; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; font-family: inherit; cursor: pointer; width: 100%; }
@@ -1062,6 +1136,10 @@ ___GOOGLE_ADS_SCRIPT___
       <p style="font-size:12px; color:var(--paper-ink-soft); margin-top:14px; margin-bottom:0;">
         We also sent it to your email as a backup.
       </p>
+      <div id="share-box" style="margin-top:18px; padding-top:16px; border-top:1px solid var(--line);">
+        <p style="margin:0 0 10px; font-size:14px;">💌 Want them (or someone else) to hear it right now?</p>
+        <div id="share-buttons"></div>
+      </div>
       ___REVIEW_BLOCK___
     </div>
   </section>
@@ -1335,13 +1413,13 @@ async function retomarSesion() {
   const resp = await fetch("/web/status?session_id=" + encodeURIComponent(sessionId));
   if (!resp.ok) return false;
   const data = await resp.json();
-  if (data.delivered && data.audio_urls && data.audio_urls.length) { mostrarDescarga(data.audio_urls); return true; }
+  if (data.delivered && data.audio_urls && data.audio_urls.length) { mostrarDescarga(data.audio_urls, data.final_title); return true; }
   if (data.step === "generando" || data.paid) { $("estado-box").style.display = "block"; iniciarPolling(); return true; }
   if (data.step === "esperando_pago" && data.stripe_client_secret) { montarStripe(data.stripe_client_secret, data.email); $("pago-box").style.display = "block"; iniciarPolling(); return true; }
   return false;
 }
 
-function mostrarDescarga(audioUrls) {
+function mostrarDescarga(audioUrls, titulo) {
   $("estado-box").style.display = "none";
   $("pago-box").style.display = "none";
   const cont = $("links-descarga");
@@ -1390,6 +1468,47 @@ function mostrarDescarga(audioUrls) {
   cont.appendChild(pdf);
   cont.appendChild(document.createElement("br"));
   $("descarga-box").style.display = "block";
+  mostrarCompartir(titulo);
+}
+
+// ago 2026: link a la pagina publica de escucha (ver render_share_page en
+// landing.py y /s/{session_id} en main.py) - a proposito NO es el link
+// directo al CDN de Suno (esa pagina tiene la marca de Tunecraft, un titulo
+// bonito y un boton de "haz una para alguien que quieras", convirtiendo
+// cada cancion compartida en publicidad gratis en vez de solo un link
+// pelon). navigator.share() (donde el navegador lo soporta, sobre todo
+// movil) abre el selector nativo del sistema con TODAS las apps instaladas,
+// no solo WhatsApp/Facebook - se ofrece como opcion principal, y los dos
+// botones explicitos quedan de respaldo para navegadores que no lo
+// soportan (sobre todo desktop).
+function mostrarCompartir(titulo) {
+  const shareUrl = window.location.origin + "/s/" + encodeURIComponent(sessionId);
+  const shareText = titulo ? ("Someone made me a song: \"" + titulo + "\" 🎵") : "Someone made me a song 🎵";
+  const cont = $("share-buttons");
+  cont.innerHTML = "";
+
+  if (navigator.share) {
+    const btnNativo = document.createElement("button");
+    btnNativo.type = "button";
+    btnNativo.className = "share-btn native";
+    btnNativo.textContent = "Share";
+    btnNativo.onclick = () => navigator.share({title: titulo || "My song", text: shareText, url: shareUrl}).catch(() => {});
+    cont.appendChild(btnNativo);
+  }
+
+  const wa = document.createElement("a");
+  wa.className = "share-btn whatsapp";
+  wa.target = "_blank"; wa.rel = "noopener";
+  wa.href = "https://wa.me/?text=" + encodeURIComponent(shareText + " " + shareUrl);
+  wa.textContent = "WhatsApp";
+  cont.appendChild(wa);
+
+  const fb = document.createElement("a");
+  fb.className = "share-btn facebook";
+  fb.target = "_blank"; fb.rel = "noopener";
+  fb.href = "https://www.facebook.com/sharer/sharer.php?u=" + encodeURIComponent(shareUrl);
+  fb.textContent = "Facebook";
+  cont.appendChild(fb);
 }
 
 function mostrarEscribiendo() {
@@ -1441,7 +1560,7 @@ function iniciarPolling() {
     const resp = await fetch("/web/status?session_id=" + encodeURIComponent(sessionId));
     const data = await resp.json();
     if (data.step === "generando" || data.paid) { $("pago-box").style.display = "none"; $("estado-box").style.display = "block"; }
-    if (data.delivered && data.audio_urls && data.audio_urls.length) { clearInterval(pollTimer); mostrarDescarga(data.audio_urls); }
+    if (data.delivered && data.audio_urls && data.audio_urls.length) { clearInterval(pollTimer); mostrarDescarga(data.audio_urls, data.final_title); }
   }, 5000);
 }
 

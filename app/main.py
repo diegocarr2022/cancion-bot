@@ -10,7 +10,7 @@ import re
 from datetime import datetime
 
 from fastapi import FastAPI, Request, Header, HTTPException, Depends, Form
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, PlainTextResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 
@@ -46,6 +46,7 @@ from app.landing import (
     google_ads_script,
     PRECIO_BADGE_EN,
     PRECIO_BADGE_WAS_EN,
+    render_share_page,
 )
 from app.legal import TERMINOS_HTML, PRIVACIDAD_HTML, TERMS_HTML_EN, PRIVACY_HTML_EN
 from app.payment_confirm import confirmar_pago, confirmar_pago_web
@@ -150,6 +151,29 @@ async def startup():
 @app.get("/healthz")
 async def health():
     return {"status": "ok"}
+
+
+# ago 2026: Diego pidio explicito que NINGUNA pagina de sesion de un cliente
+# se pueda indexar en buscadores - esto es el respaldo a nivel robots.txt
+# (Disallow, evita que un crawler bien portado ni siquiera intente pedir
+# estas rutas); el respaldo real/duro es el header X-Robots-Tag que cada
+# una de estas rutas manda en su propia respuesta (ver /s/{session_id},
+# /pago-exitoso/*, /web/lyrics-pdf/*, /web/download-audio/*, /admin* mas
+# abajo) - eso es lo que de verdad evita que Google la indexe si alguien le
+# pone un link desde otro lado (robots.txt Disallow por si solo NO
+# des-indexa una URL ya conocida, solo evita que la rastree por primera
+# vez). Las paginas de marketing (/, /cancion, /terms, /privacy, etc.) NO
+# se listan aca - esas SI queremos que se indexen.
+@app.get("/robots.txt", response_class=PlainTextResponse)
+async def robots_txt():
+    return (
+        "User-agent: *\n"
+        "Disallow: /s/\n"
+        "Disallow: /pago-exitoso\n"
+        "Disallow: /web/\n"
+        "Disallow: /admin\n"
+        "Disallow: /ir/\n"
+    )
 
 
 # La raiz del dominio ES la landing en ingles directamente (ago 2026: EE.UU.
@@ -434,7 +458,10 @@ async def web_lyrics_pdf(session_id: str):
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{slug}-lyrics.pdf"'},
+        headers={
+            "Content-Disposition": f'inline; filename="{slug}-lyrics.pdf"',
+            "X-Robots-Tag": "noindex, nofollow",
+        },
     )
 
 
@@ -467,8 +494,35 @@ async def web_download_audio(session_id: str, index: int):
     return Response(
         content=resp.content,
         media_type=resp.headers.get("content-type", "audio/mpeg"),
-        headers={"Content-Disposition": f'attachment; filename="{slug}{suffix}.mp3"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{slug}{suffix}.mp3"',
+            "X-Robots-Tag": "noindex, nofollow",
+        },
     )
+
+
+@app.get("/s/{session_id}", response_class=HTMLResponse)
+async def share_song(session_id: str, response: Response):
+    """Pagina publica de escucha (ago 2026) - lo que abre alguien que recibio
+    el link que un cliente comparte por WhatsApp/Facebook desde la pantalla
+    de entrega (ver mostrarCompartir() en landing.py). Publica a proposito,
+    sin pedir nada - session_id ya funciona como token no adivinable (mismo
+    criterio que /web/lyrics-pdf/{session_id}, que tampoco pide nada mas).
+    Solo expone titulo + audio (Diego decidio a proposito no mostrar
+    anecdotas/detalles privados del chat ni el correo - cualquiera con el
+    link puede abrir esto, no solo el cliente). X-Robots-Tag (ademas del
+    <meta name="robots"> que ya trae render_share_page): ninguna pagina de
+    sesion de un cliente en particular se debe indexar en buscadores - a
+    diferencia de /cancion o /, que SI queremos indexadas."""
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    order = db.get_web_order(session_id)
+    if not order or not order.get("delivered") or not order.get("audio_urls"):
+        raise HTTPException(status_code=404, detail="Song not found")
+    import json as _json
+    audio_urls = _json.loads(order["audio_urls"])
+    if not audio_urls:
+        raise HTTPException(status_code=404, detail="Song not found")
+    return render_share_page(order.get("final_title"), audio_urls[0])
 
 
 # ---------------------------------------------------------------------------
@@ -489,7 +543,10 @@ async def web_download_audio(session_id: str, index: int):
 # de regreso directo a su chat (por si cierra esta pestaña o la perdio de
 # algun modo).
 @app.get("/pago-exitoso/web/{session_id}", response_class=HTMLResponse)
-async def pago_exitoso_web(session_id: str):
+async def pago_exitoso_web(session_id: str, response: Response):
+    # Pagina de sesion de un cliente en particular - nunca se debe indexar
+    # en buscadores (a diferencia de /cancion o /, que si queremos indexadas).
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
     order = db.get_web_order(session_id) or {}
 
     # PayPal (EE.UU.), a diferencia de dLocal Go, no confirma el pago solo
@@ -615,11 +672,12 @@ async def pago_exitoso_web(session_id: str):
 
 
 @app.get("/pago-exitoso", response_class=HTMLResponse)
-async def pago_exitoso():
+async def pago_exitoso(response: Response):
     # Version Telegram (sin session_id en la URL - dLocal Go la usa igual
     # para esos pagos). No hace falta que haga nada - la confirmacion real
     # del pago llega por webhook/polling - es solo para que el cliente no
     # vea un JSON crudo y sepa que puede volver a Telegram.
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
     boton = ""
     if BOT_USERNAME:
         boton = f"""
@@ -743,7 +801,10 @@ h2 { font-size:13px; text-transform:uppercase; letter-spacing:0.04em; color:#6b7
 
 
 @app.get("/admin", response_class=HTMLResponse)
-async def admin_panel(_: bool = Depends(_verificar_admin)):
+async def admin_panel(response: Response, _: bool = Depends(_verificar_admin)):
+    # Panel interno - ya esta protegido por contraseña, pero de todos modos
+    # nunca debe indexarse (defensa en profundidad).
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
     stats = db.get_stats()
     orders = db.get_all_orders(limit=300)
     canales = db.get_click_stats()
@@ -955,7 +1016,8 @@ async def admin_reset_all(_: bool = Depends(_verificar_admin)):
 
 
 @app.get("/admin/orden/web/{session_id}", response_class=HTMLResponse)
-async def admin_orden_web(session_id: str, _: bool = Depends(_verificar_admin)):
+async def admin_orden_web(session_id: str, response: Response, _: bool = Depends(_verificar_admin)):
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
     order = db.get_web_order(session_id)
     if not order:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
@@ -1003,7 +1065,8 @@ async def admin_orden_web(session_id: str, _: bool = Depends(_verificar_admin)):
 
 
 @app.get("/admin/orden/telegram/{chat_id}", response_class=HTMLResponse)
-async def admin_orden_telegram(chat_id: int, _: bool = Depends(_verificar_admin)):
+async def admin_orden_telegram(chat_id: int, response: Response, _: bool = Depends(_verificar_admin)):
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
     order = db.get_order(chat_id)
     if not order:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
