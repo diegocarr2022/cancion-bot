@@ -204,6 +204,11 @@ MIGRATIONS = [
     # siga cobrando exactamente lo mismo que se le mostro al inicio, sin
     # importar si el visitante cambio de red/IP a mitad de la charla.
     "ALTER TABLE web_orders ADD COLUMN price_override TEXT",
+    # ago 2026: correo de recuperacion de carrito abandonado (cupon de un
+    # solo uso para quien aprobo la letra pero nunca pago) - ver
+    # poll_recovery_email_loop en main.py. Mismo patron que
+    # review_email_sent: evita mandarlo mas de una vez por pedido.
+    "ALTER TABLE web_orders ADD COLUMN recovery_email_sent INTEGER NOT NULL DEFAULT 0",
 ]
 
 
@@ -585,6 +590,33 @@ def find_recent_web_order_by_email(email: str, language: str | None = None):
 
 def mark_review_link_clicked(session_id: str):
     update_web_order(session_id, review_link_clicked=1)
+
+
+def find_web_orders_pending_recovery_email(min_hours: int = 2, max_hours: int = 48):
+    """Pedidos que llegaron a aprobar la letra (final_lyric ya existe, se
+    genero un link de pago) pero nunca pagaron, en ingles, con correo -
+    entre min_hours y max_hours desde la ultima actualizacion (ni tan
+    reciente que todavia podria estar a mitad de pagar, ni tan viejo que ya
+    se le dio por perdido del todo - ver PENDING_PAYMENT_MAX_HORAS en
+    main.py, que marca step="pago_fallido" pasado ese corte), que todavia
+    no recibio el correo con el precio especial de recuperacion."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM web_orders
+            WHERE paid = 0
+              AND delivered = 0
+              AND language = 'en'
+              AND final_lyric IS NOT NULL
+              AND email IS NOT NULL
+              AND step != 'pago_fallido'
+              AND recovery_email_sent = 0
+              AND datetime(updated_at) <= datetime('now', ?)
+              AND datetime(updated_at) >= datetime('now', ?)
+            """,
+            (f"-{min_hours} hours", f"-{max_hours} hours"),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def find_web_orders_pending_review_reminder(min_hours_since_delivery: int = 48):

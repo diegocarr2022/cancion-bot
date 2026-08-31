@@ -23,7 +23,9 @@ from app.config import (
     get_precio_pais,
     get_precio_en_mx,
     get_precio_en_mx_was,
+    get_precio_recovery,
     resolve_precio_orden,
+    RECOVERY_EMAIL_MIN_HOURS,
     POLL_INTERVAL_SECONDS,
     POLL_INTERVAL_STUCK_SECONDS,
     PENDING_PAYMENT_MAX_HORAS,
@@ -38,7 +40,12 @@ from app.config import (
 )
 from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
-from app.email_client import enviar_cancion_por_correo, enviar_recordatorio_resena, enviar_correo_de_prueba
+from app.email_client import (
+    enviar_cancion_por_correo,
+    enviar_recordatorio_resena,
+    enviar_correo_de_prueba,
+    enviar_correo_recuperacion,
+)
 from app.landing import (
     LANDING_HTML_ES,
     LANDING_HTML_EN,
@@ -140,11 +147,12 @@ async def startup():
     _spawn(poll_web_suno_tasks_loop())
     _spawn(poll_web_pending_payments_loop())
     _spawn(poll_review_reminder_loop())
+    _spawn(poll_recovery_email_loop())
     log.info(
         "Loops de background arrancados: poll_suno_tasks_loop, "
         "poll_pending_payments_loop, poll_stuck_generation_loop, "
         "poll_web_suno_tasks_loop, poll_web_pending_payments_loop, "
-        "poll_review_reminder_loop"
+        "poll_review_reminder_loop, poll_recovery_email_loop"
     )
 
 
@@ -1558,6 +1566,65 @@ async def poll_review_reminder_loop():
         except Exception:
             log.exception("Error en el loop de recordatorio de reseña")
         await asyncio.sleep(REVIEW_REMINDER_POLL_SECONDS)
+
+
+# ago 2026: cupon de recuperacion de carrito abandonado (per Diego: "esos ya
+# me costaron el click de publicidad, asi que si de 3 logro rescatar 1, ya
+# es ganancia"). RECOVERY_EMAIL_MAX_HOURS queda un poco por debajo de
+# PENDING_PAYMENT_MAX_HORAS (el corte que marca step="pago_fallido") para
+# no intentar rescatar algo que el resto del sistema ya dio por perdido.
+RECOVERY_EMAIL_POLL_SECONDS = 3600  # cada hora alcanza sobra - no es urgente
+RECOVERY_EMAIL_MAX_HOURS = max(1, PENDING_PAYMENT_MAX_HORAS - 1)
+
+
+async def poll_recovery_email_loop():
+    """Pedidos con la letra ya aprobada (link de pago generado) que nunca
+    pagaron - se les manda UNA vez un correo con un precio especial
+    (get_precio_recovery en config.py) para intentar rescatar la venta. El
+    precio con descuento se genera de una vez (Checkout Session fresca,
+    igual que crear_link_pago ya hace en cualquier otro punto) y se guarda
+    en la orden via price_override="recovery" - asi el link del correo es
+    tan simple como volver a /cancion?lang=en&session_id=... (retomarSesion()
+    en landing.py ya sabe mostrar el pago pendiente), y si el cliente vuelve
+    dias despues y ese Checkout Session ya expiro, cualquier regeneracion
+    posterior (ver resolve_precio_orden) sigue respetando el mismo precio
+    con descuento - nunca "se le olvida" el cupon."""
+    while True:
+        try:
+            pendientes = db.find_web_orders_pending_recovery_email(
+                RECOVERY_EMAIL_MIN_HOURS, RECOVERY_EMAIL_MAX_HOURS,
+            )
+            log.info(
+                "[poll_recovery_email_loop] tick - %d pedido(s) abandonado(s) por recuperar",
+                len(pendientes),
+            )
+            for order in pendientes:
+                session_id = order["session_id"]
+                try:
+                    precio_recovery = get_precio_recovery(order.get("tier", "song"))
+                    db.update_web_order(session_id, price_override="recovery")
+                    await crear_link_pago(
+                        session_id, order, precio_recovery, customer_email=order["email"],
+                    )
+                    recovery_url = f"{BASE_URL}/cancion?lang=en&session_id={session_id}"
+                    enviado = await enviar_correo_recuperacion(
+                        order["email"], order.get("final_title") or "your song",
+                        precio_recovery["texto"], recovery_url,
+                    )
+                    if enviado:
+                        db.update_web_order(session_id, recovery_email_sent=1)
+                        await send_message(
+                            ADMIN_CHAT_ID,
+                            f"💌 Correo de recuperacion mandado a {order['email']} "
+                            f"(session_id={session_id}, {precio_recovery['texto']}).",
+                        )
+                except Exception:
+                    log.exception(
+                        "Error mandando correo de recuperacion para session_id=%s", session_id,
+                    )
+        except Exception:
+            log.exception("Error en el loop de recuperacion de carrito abandonado")
+        await asyncio.sleep(RECOVERY_EMAIL_POLL_SECONDS)
 
 
 # PayPal invalida sola una orden no aprobada unas horas despues de creada -

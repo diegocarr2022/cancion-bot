@@ -98,6 +98,12 @@ services:
         sync: false
       - key: PRECIO_TIPO_CAMBIO_MXN_EN
         sync: false
+      - key: PRECIO_RECOVERY_USD
+        sync: false
+      - key: PRECIO_TEXTO_RECOVERY_USD
+        sync: false
+      - key: RECOVERY_EMAIL_MIN_HOURS
+        sync: false
       - key: ENABLE_VIDEO_TIER
         sync: false
       - key: MEDIA_DIR

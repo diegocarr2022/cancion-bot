@@ -194,7 +194,30 @@ def resolve_precio_orden(country_code: str | None, tier: str = "song", price_ove
     crear_link_pago (web_conversation.py)."""
     if price_override == "mx_en":
         return get_precio_en_mx(tier)
+    if price_override == "recovery":
+        return get_precio_recovery(tier)
     return get_precio_pais(country_code, tier)
+
+
+# --- Cupon de recuperacion de carrito abandonado (ago 2026) ---
+# Pedidos que llegaron a aprobar la letra (ya se genero un link de pago) pero
+# nunca pagaron, con correo - se les manda un correo con un precio especial
+# de una sola vez para tratar de rescatar la venta (ver poll_recovery_email_loop
+# en main.py). Diego ya pago el clic de publicidad que trajo a este visitante -
+# cualquier venta que se rescate con este precio menor sigue siendo ganancia
+# neta, no hace falta que iguale el precio normal. Solo tier "song" (el unico
+# que existe en la practica hoy) y solo el flujo en ingles/Stripe, mismo
+# criterio que el resto de features nuevas de esta sesion.
+PRECIO_RECOVERY_USD = float(os.environ.get("PRECIO_RECOVERY_USD", "19.99"))
+PRECIO_TEXTO_RECOVERY_USD = os.environ.get("PRECIO_TEXTO_RECOVERY_USD", "$19.99 USD")
+# Horas minimas desde la ultima actualizacion del pedido antes de mandar el
+# correo de recuperacion - suficiente margen para que el cliente no este
+# todavia a mitad de pagar (ver poll_recovery_email_loop en main.py).
+RECOVERY_EMAIL_MIN_HOURS = float(os.environ.get("RECOVERY_EMAIL_MIN_HOURS", "2"))
+
+
+def get_precio_recovery(tier: str = "song") -> dict:
+    return {"currency": "USD", "amount": PRECIO_RECOVERY_USD, "texto": PRECIO_TEXTO_RECOVERY_USD}
 
 
 # Tu chat_id de Telegram (el del administrador). Se usa para el comando

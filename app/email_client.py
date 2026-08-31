@@ -170,6 +170,42 @@ async def enviar_video_por_correo(destinatario: str, titulo: str, video_url: str
         return False
 
 
+async def enviar_correo_recuperacion(
+    destinatario: str, titulo: str, precio_texto: str, recovery_url: str,
+) -> bool:
+    """Correo de recuperacion de carrito abandonado (ago 2026, ver
+    poll_recovery_email_loop en main.py) - para quien aprobo la letra pero
+    nunca completo el pago. Ofrece un precio especial de una sola vez
+    (PRECIO_RECOVERY_USD en config.py) para intentar rescatar la venta. Solo
+    existe en ingles, mismo criterio que el resto del flujo EN/Stripe."""
+    if not MAILGUN_API_KEY or not MAILGUN_DOMAIN:
+        log.warning(
+            "MAILGUN_API_KEY/MAILGUN_DOMAIN no configurados - se omite el "
+            "correo de recuperacion para %s.", destinatario,
+        )
+        return False
+
+    cuerpo_html = f"""
+    <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+      <h2>🎵 Still want "{titulo}"?</h2>
+      <p>We noticed you wrote the lyrics for your song but didn't finish checkout.
+      We really value our customers, and we want you to have your song - so if you
+      follow the link below, you can complete it at a special one-time price of
+      just {precio_texto}.</p>
+      <p><a href="{recovery_url}" style="color:#c2410c; font-weight:bold;">Finish my song for {precio_texto}</a></p>
+      <p style="color:#6b7280; font-size:13px;">Your lyrics are already approved and waiting - this just picks up right where you left off.</p>
+    </div>
+    """
+    asunto = f"🎵 {BRAND_NAME_EN}: your song is waiting - special price inside"
+
+    try:
+        await _enviar_async(destinatario, asunto, cuerpo_html)
+        return True
+    except Exception:
+        log.exception("Error mandando el correo de recuperacion a %s", destinatario)
+        return False
+
+
 async def enviar_correo_de_prueba(destinatario: str) -> tuple[bool, str]:
     """Solo para confirmar que Mailgun quedo bien configurado (DNS/API key)
     antes de depender de el en un pedido real - ver POST /admin/test-email
