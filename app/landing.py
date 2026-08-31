@@ -306,6 +306,10 @@ ___GOOGLE_ADS_SCRIPT___
     background: linear-gradient(135deg, #e8813a, #d96b2b); color: white;
     text-decoration: none; border-radius: 10px; font-weight: 700;
   }
+  .descarga-item { text-align: left; border: 1px solid #eee0d4; border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
+  .descarga-item-titulo { margin: 0 0 8px; font-weight: 700; }
+  .descarga-item audio { display: block; margin-bottom: 10px; width: 100%; }
+  .descarga-item a { padding: 10px 20px; font-size: 14px; margin-top: 0; }
   .spinner {
     display: inline-block; width: 16px; height: 16px; border: 2px solid #e7dccb;
     border-top-color: #d96b2b; border-radius: 50%; animation: girar 0.8s linear infinite;
@@ -506,13 +510,34 @@ function mostrarDescarga(audioUrls) {
   $("pago-box").style.display = "none";
   const cont = $("links-descarga");
   cont.innerHTML = "";
+
+  // ago 2026: mismo bug reportado del lado en ingles - el link apuntaba
+  // directo al CDN de Suno (otro dominio) y el atributo download de un <a>
+  // NO funciona cross-origin (el navegador lo ignora y navega al archivo
+  // en vez de descargarlo). Cada version ahora trae un reproductor <audio>
+  // embebido (escuchar sin descargar) + un boton de descarga real que pasa
+  // por /web/download-audio/{session}/{i} (mismo dominio, ver main.py).
   audioUrls.forEach((url, i) => {
-    const a = document.createElement("a");
-    a.href = url; a.target = "_blank"; a.rel = "noopener";
-    a.textContent = audioUrls.length > 1 ? ("Descargar versión " + (i + 1)) : "Descargar mi canción";
-    cont.appendChild(a);
-    cont.appendChild(document.createElement("br"));
+    const bloque = document.createElement("div");
+    bloque.className = "descarga-item";
+
+    const titulo = document.createElement("p");
+    titulo.className = "descarga-item-titulo";
+    titulo.textContent = audioUrls.length > 1 ? ("Versión " + (i + 1)) : "Tu canción";
+    bloque.appendChild(titulo);
+
+    const audio = document.createElement("audio");
+    audio.controls = true; audio.src = url; audio.style.width = "100%";
+    bloque.appendChild(audio);
+
+    const descargar = document.createElement("a");
+    descargar.href = "/web/download-audio/" + encodeURIComponent(sessionId) + "/" + i;
+    descargar.textContent = "⬇ Descargar esta versión";
+    bloque.appendChild(descargar);
+
+    cont.appendChild(bloque);
   });
+
   $("descarga-box").style.display = "block";
 }
 
@@ -856,6 +881,13 @@ ___GOOGLE_ADS_SCRIPT___
 
   #pago-box, #estado-box, #descarga-box { display: none; text-align: center; }
   #pago-box a, #descarga-box a { display: inline-block; margin-top: 12px; padding: 15px 28px; background: var(--rec); color: #fff5ee; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; }
+  .descarga-aviso { background: #fff3e8; border: 1px solid #f2c9a0; border-radius: 10px; padding: 10px 14px; font-size: 14px; color: #7a4a1e; margin: 0 0 14px; }
+  .descarga-item { text-align: left; border: 1px solid #eee0d4; border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
+  .descarga-item-titulo { margin: 0 0 8px; font-weight: 700; }
+  .descarga-item audio { display: block; margin-bottom: 10px; }
+  .descarga-item a { padding: 10px 20px; font-size: 14px; }
+  .trust-badge { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; font-size: 12.5px; color: #8a7a6b; }
+  .trust-badge svg { flex-shrink: 0; color: #8a7a6b; }
   #stripe-currency-selector { text-align: left; margin-top: 14px; }
   #stripe-payment-element { text-align: left; margin-top: 10px; }
   #btn-pagar { display: inline-block; margin-top: 16px; padding: 15px 28px; background: var(--rec); color: #fff5ee; border: none; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; font-family: inherit; cursor: pointer; width: 100%; }
@@ -1008,6 +1040,13 @@ ___GOOGLE_ADS_SCRIPT___
       <div id="stripe-payment-element"><span class="spinner"></span>Setting up your payment...</div>
       <button id="btn-pagar" type="button">Pay ___PRECIO_BADGE_DYNAMIC___ &amp; Create My Song</button>
       <p id="stripe-error"></p>
+      <p class="trust-badge">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <rect x="4" y="11" width="16" height="10" rx="2" stroke="currentColor" stroke-width="2"/>
+          <path d="M8 11V7a4 4 0 0 1 8 0v4" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        Encrypted &amp; processed securely by Stripe - we never see or store your card details.
+      </p>
     </div>
 
     <div class="player" id="estado-box">
@@ -1307,13 +1346,43 @@ function mostrarDescarga(audioUrls) {
   $("pago-box").style.display = "none";
   const cont = $("links-descarga");
   cont.innerHTML = "";
+
+  // Un cliente reporto que "Download" abria la cancion en el navegador en
+  // vez de descargarla - el link apuntaba directo al CDN de Suno (otro
+  // dominio), y el atributo download de un <a> NO funciona cross-origin
+  // (el navegador simplemente lo ignora y navega al archivo). Ahora cada
+  // version trae DOS controles separados: un reproductor <audio> embebido
+  // (para escuchar ahi mismo, sin descargar nada) y un boton de descarga
+  // real que pasa por /web/download-audio/{session}/{i} (mismo dominio,
+  // ver main.py) - ese proxy si logra forzar la descarga.
+  if (audioUrls.length > 1) {
+    const aviso = document.createElement("p");
+    aviso.className = "descarga-aviso";
+    aviso.textContent = "We made 2 different takes of your song - no need to pick just one, enjoy (and keep) both!";
+    cont.appendChild(aviso);
+  }
+
   audioUrls.forEach((url, i) => {
-    const a = document.createElement("a");
-    a.href = url; a.target = "_blank"; a.rel = "noopener";
-    a.textContent = audioUrls.length > 1 ? ("Download version " + (i + 1)) : "Download my song";
-    cont.appendChild(a);
-    cont.appendChild(document.createElement("br"));
+    const bloque = document.createElement("div");
+    bloque.className = "descarga-item";
+
+    const titulo = document.createElement("p");
+    titulo.className = "descarga-item-titulo";
+    titulo.textContent = audioUrls.length > 1 ? ("Version " + (i + 1)) : "Your song";
+    bloque.appendChild(titulo);
+
+    const audio = document.createElement("audio");
+    audio.controls = true; audio.src = url; audio.style.width = "100%";
+    bloque.appendChild(audio);
+
+    const descargar = document.createElement("a");
+    descargar.href = "/web/download-audio/" + encodeURIComponent(sessionId) + "/" + i;
+    descargar.textContent = "⬇ Download this version";
+    bloque.appendChild(descargar);
+
+    cont.appendChild(bloque);
   });
+
   const pdf = document.createElement("a");
   pdf.href = "/web/lyrics-pdf/" + encodeURIComponent(sessionId);
   pdf.target = "_blank"; pdf.rel = "noopener";

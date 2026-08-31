@@ -438,6 +438,39 @@ async def web_lyrics_pdf(session_id: str):
     )
 
 
+@app.get("/web/download-audio/{session_id}/{index}")
+async def web_download_audio(session_id: str, index: int):
+    """Proxy de descarga del audio (ago 2026). Los links de audio son del CDN
+    de Suno (otro dominio) - un cliente reporto que el boton "Download"
+    abria la cancion en el navegador en vez de descargarla, porque el
+    atributo download de un <a> NO funciona cross-origin (los navegadores lo
+    ignoran en ese caso y simplemente navegan al archivo). Traemos el
+    archivo nosotros del lado del servidor y lo re-servimos desde nuestro
+    propio dominio con Content-Disposition: attachment, que si fuerza la
+    descarga sin importar el origen real. El link directo al CDN se sigue
+    ofreciendo aparte (reproductor <audio> embebido) para escuchar sin
+    descargar - ver mostrarDescarga() en landing.py."""
+    order = db.get_web_order(session_id)
+    if not order or not order.get("audio_urls"):
+        raise HTTPException(status_code=404, detail="Sesion no encontrada")
+    import json as _json
+    audio_urls = _json.loads(order["audio_urls"])
+    if index < 0 or index >= len(audio_urls):
+        raise HTTPException(status_code=404, detail="Version no encontrada")
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.get(audio_urls[index])
+        resp.raise_for_status()
+
+    slug = re.sub(r"[^a-z0-9]+", "-", (order.get("final_title") or "tunecraft-song").lower()).strip("-") or "tunecraft-song"
+    suffix = f"-v{index + 1}" if len(audio_urls) > 1 else ""
+    return Response(
+        content=resp.content,
+        media_type=resp.headers.get("content-type", "audio/mpeg"),
+        headers={"Content-Disposition": f'attachment; filename="{slug}{suffix}.mp3"'},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Pagina a la que dLocal Go redirige al cliente en su navegador despues de
 # pagar (success_url). No hace falta que haga nada - la confirmacion real
