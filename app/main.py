@@ -38,7 +38,7 @@ from app.config import (
 )
 from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
-from app.email_client import enviar_cancion_por_correo, enviar_recordatorio_resena
+from app.email_client import enviar_cancion_por_correo, enviar_recordatorio_resena, enviar_correo_de_prueba
 from app.landing import (
     LANDING_HTML_ES,
     LANDING_HTML_EN,
@@ -1020,6 +1020,22 @@ async def admin_panel(response: Response, _: bool = Depends(_verificar_admin)):
 async def admin_reset_all(_: bool = Depends(_verificar_admin)):
     db.reset_all()
     return RedirectResponse(url="/admin", status_code=303)
+
+
+@app.post("/admin/test-email")
+async def admin_test_email(request: Request, _: bool = Depends(_verificar_admin)):
+    """Solo para confirmar que Mailgun quedo bien configurado (DNS +
+    MAILGUN_API_KEY/MAILGUN_DOMAIN en Render) antes de depender de el en un
+    pedido real - dispara el envio DESDE el servidor (que si tiene las
+    credenciales reales como variables de entorno) sin que el secreto pase
+    nunca por el chat. Protegido con la misma contraseña de admin que el
+    resto del panel."""
+    body = await request.json() if await request.body() else {}
+    destinatario = (body.get("to") or "").strip()
+    if not destinatario:
+        raise HTTPException(status_code=400, detail="Falta 'to' (correo destino)")
+    ok, detalle = await enviar_correo_de_prueba(destinatario)
+    return {"ok": ok, "detalle": detalle}
 
 
 @app.get("/admin/orden/web/{session_id}", response_class=HTMLResponse)

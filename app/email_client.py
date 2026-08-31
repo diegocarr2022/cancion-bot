@@ -168,3 +168,28 @@ async def enviar_video_por_correo(destinatario: str, titulo: str, video_url: str
     except Exception:
         log.exception("Error mandando el correo de video a %s", destinatario)
         return False
+
+
+async def enviar_correo_de_prueba(destinatario: str) -> tuple[bool, str]:
+    """Solo para confirmar que Mailgun quedo bien configurado (DNS/API key)
+    antes de depender de el en un pedido real - ver POST /admin/test-email
+    en main.py. Devuelve (ok, detalle) en vez de solo bool: a diferencia de
+    las funciones de arriba (que no deben bloquear la entrega de una
+    cancion por un error de correo), aca SI queremos saber la razon exacta
+    si falla, para poder decirle a Diego que revisar."""
+    if not MAILGUN_API_KEY or not MAILGUN_DOMAIN:
+        return False, "MAILGUN_API_KEY/MAILGUN_DOMAIN no estan configurados en Render todavia."
+    cuerpo_html = f"""
+    <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+      <h2>✅ Mailgun esta funcionando</h2>
+      <p>Este es un correo de prueba de {BRAND_NAME_EN} - si lo recibiste, el DNS y el API key
+      de Mailgun quedaron bien configurados y el correo de entrega real va a funcionar.</p>
+    </div>
+    """
+    try:
+        await _enviar_async(destinatario, f"✅ {BRAND_NAME_EN}: prueba de Mailgun", cuerpo_html)
+        return True, "Enviado."
+    except httpx.HTTPStatusError as e:
+        return False, f"Mailgun rechazo el envio: {e.response.status_code} {e.response.text}"
+    except Exception as e:
+        return False, f"Error inesperado: {e}"
