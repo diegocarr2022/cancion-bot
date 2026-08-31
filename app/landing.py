@@ -843,8 +843,20 @@ ___GOOGLE_ADS_SCRIPT___
      (Checkout Sessions ui_mode="elements") exige por lo menos la release "basil";
      se usa la misma que STRIPE_API_VERSION en stripe_client.py (Stripe.js versionado
      usa automaticamente la version de API de su propia release, no se puede
-     mezclar - docs.stripe.com/sdks/stripejs-versioning). -->
-<script src="https://js.stripe.com/dahlia/stripe.js"></script>
+     mezclar - docs.stripe.com/sdks/stripejs-versioning).
+
+     "defer": Stripe.js estaba bloqueando el render inicial ~700ms (detectado
+     con PageSpeed) sin necesitarse todavia en ese momento - nadie llega a
+     pagar sin antes chatear la letra. IMPORTANTE: esto exige que iniciar()
+     (al final de este mismo archivo) tambien espere a DOMContentLoaded en
+     vez de llamarse de forma sincronica - si no, un cliente que entra por
+     el link del correo de recuperacion de carrito (?session_id=... de una
+     orden ya en "esperando_pago") monta Stripe DE INMEDIATO al cargar via
+     retomarSesion(), y esa llamada podria ejecutarse antes de que este
+     script diferido termine de definir window.Stripe. Los dos cambios
+     (defer aca + DOMContentLoaded alla abajo) van juntos, no se puede
+     quitar uno sin el otro. -->
+<script src="https://js.stripe.com/dahlia/stripe.js" defer></script>
 <style>
   :root {
     --ink: #16110d; --ink-raised: #1e1710; --paper: #efe4cc; --paper-dim: #e4d7ba;
@@ -1491,7 +1503,7 @@ function crearBotonesCompartir(index, titulo, multiplesVersiones) {
   const shareUrl = window.location.origin + "/s/" + encodeURIComponent(sessionId) + "/" + index;
   const etiquetaVersion = multiplesVersiones ? (" (version " + (index + 1) + ")") : "";
   const shareText = titulo
-    ? ("Someone made me a song: \"" + titulo + "\"" + etiquetaVersion + " 🎵")
+    ? ("Someone made me a song: \\"" + titulo + "\\"" + etiquetaVersion + " 🎵")
     : "Someone made me a song 🎵";
 
   const cont = document.createElement("div");
@@ -1612,7 +1624,14 @@ document.querySelectorAll("audio").forEach((audio) => {
   });
 });
 
-iniciar();
+// Stripe.js ahora carga con "defer" (ver el <script> en el <head>, arriba) -
+// hay que esperar a DOMContentLoaded (que solo se dispara DESPUES de que
+// todo script diferido ya se ejecuto) antes de llamar iniciar(), porque
+// retomarSesion() puede montar Stripe de inmediato si el cliente llega por
+// el link del correo de recuperacion de carrito abandonado. Llamar iniciar()
+// de forma sincronica (como antes) correria antes de que window.Stripe
+// exista todavia, y tronaria justo para ese caso.
+document.addEventListener("DOMContentLoaded", iniciar);
 </script>
 </body>
 </html>
