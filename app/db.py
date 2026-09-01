@@ -592,14 +592,22 @@ def mark_review_link_clicked(session_id: str):
     update_web_order(session_id, review_link_clicked=1)
 
 
-def find_web_orders_pending_recovery_email(min_hours: int = 2, max_hours: int = 48):
+def find_web_orders_pending_recovery_email(min_hours: int = 2):
     """Pedidos que llegaron a aprobar la letra (final_lyric ya existe, se
-    genero un link de pago) pero nunca pagaron, en ingles, con correo -
-    entre min_hours y max_hours desde la ultima actualizacion (ni tan
-    reciente que todavia podria estar a mitad de pagar, ni tan viejo que ya
-    se le dio por perdido del todo - ver PENDING_PAYMENT_MAX_HORAS en
-    main.py, que marca step="pago_fallido" pasado ese corte), que todavia
-    no recibio el correo con el precio especial de recuperacion."""
+    genero un link de pago) pero nunca pagaron, en ingles, con correo, con
+    al menos min_hours desde la ultima actualizacion (para no interrumpir a
+    alguien que todavia podria estar a mitad de pagar), que todavia no
+    recibio el correo con el precio especial de recuperacion.
+
+    ago 2026 (ajuste tras el lanzamiento real): a proposito SIN limite
+    superior de horas, y sin importar si ya se marco step="pago_fallido"
+    (el corte de PENDING_PAYMENT_MAX_HORAS en main.py) - Diego encontro 2
+    pedidos abandonados de VARIOS DIAS que nunca recibieron el correo
+    porque el limite anterior (47h) y la exclusion de pago_fallido los
+    dejaban fuera. El clic de publicidad que trajo a ese cliente ya esta
+    pagado sin importar cuantos dias pasen, asi que sigue valiendo la pena
+    el intento - recovery_email_sent=0 ya protege por si solo contra
+    mandarlo mas de una vez, no hace falta ademas un limite de tiempo."""
     with get_conn() as conn:
         rows = conn.execute(
             """
@@ -609,12 +617,10 @@ def find_web_orders_pending_recovery_email(min_hours: int = 2, max_hours: int = 
               AND language = 'en'
               AND final_lyric IS NOT NULL
               AND email IS NOT NULL
-              AND step != 'pago_fallido'
               AND recovery_email_sent = 0
               AND datetime(updated_at) <= datetime('now', ?)
-              AND datetime(updated_at) >= datetime('now', ?)
             """,
-            (f"-{min_hours} hours", f"-{max_hours} hours"),
+            (f"-{min_hours} hours",),
         ).fetchall()
         return [dict(r) for r in rows]
 

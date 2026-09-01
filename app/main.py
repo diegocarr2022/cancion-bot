@@ -1570,11 +1570,10 @@ async def poll_review_reminder_loop():
 
 # ago 2026: cupon de recuperacion de carrito abandonado (per Diego: "esos ya
 # me costaron el click de publicidad, asi que si de 3 logro rescatar 1, ya
-# es ganancia"). RECOVERY_EMAIL_MAX_HOURS queda un poco por debajo de
-# PENDING_PAYMENT_MAX_HORAS (el corte que marca step="pago_fallido") para
-# no intentar rescatar algo que el resto del sistema ya dio por perdido.
+# es ganancia"). Sin limite superior de horas a proposito (ver el docstring
+# de find_web_orders_pending_recovery_email en db.py) - un pedido de dias
+# atras sigue valiendo el intento, recovery_email_sent ya evita reenviarlo.
 RECOVERY_EMAIL_POLL_SECONDS = 3600  # cada hora alcanza sobra - no es urgente
-RECOVERY_EMAIL_MAX_HOURS = max(1, PENDING_PAYMENT_MAX_HORAS - 1)
 
 
 async def poll_recovery_email_loop():
@@ -1591,9 +1590,7 @@ async def poll_recovery_email_loop():
     con descuento - nunca "se le olvida" el cupon."""
     while True:
         try:
-            pendientes = db.find_web_orders_pending_recovery_email(
-                RECOVERY_EMAIL_MIN_HOURS, RECOVERY_EMAIL_MAX_HOURS,
-            )
+            pendientes = db.find_web_orders_pending_recovery_email(RECOVERY_EMAIL_MIN_HOURS)
             log.info(
                 "[poll_recovery_email_loop] tick - %d pedido(s) abandonado(s) por recuperar",
                 len(pendientes),
