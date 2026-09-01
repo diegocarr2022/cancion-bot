@@ -1050,7 +1050,7 @@ ___GOOGLE_ADS_SCRIPT___
       </svg>
     </div>
 
-    <h1>A gift that's<br><em>never existed</em><br>until now.</h1>
+    <h1>A gift that<br><em>never existed</em><br>until now.</h1>
     <p class="sub">The most unique gift you'll ever give - a real song written and sung from your story. You approve every lyric before you pay a cent.</p>
 
     <div class="price-row">
