@@ -782,7 +782,7 @@ _JSON_LD_EN = f"""
     {{"@type": "Question", "name": "How fast will it actually arrive?", "acceptedAnswer": {{"@type": "Answer", "text": "Usually within a few minutes of paying. It shows up right on this page, plus a backup copy by email."}}}},
     {{"@type": "Question", "name": "Is it really one-of-a-kind?", "acceptedAnswer": {{"@type": "Answer", "text": "Yes - every song is written from scratch, based on your story. No templates, no stock lyrics, no reused lines."}}}},
     {{"@type": "Question", "name": "Is this AI-generated?", "acceptedAnswer": {{"@type": "Answer", "text": "Yes - the music and vocals are composed by AI from the story you give us, and you approve the lyrics before anything is produced."}}}},
-    {{"@type": "Question", "name": "What does it cost?", "acceptedAnswer": {{"@type": "Answer", "text": "{_PRECIO_BADGE_EN}, flat, for a limited launch window. You only pay once you've approved the lyrics - nothing before that."}}}}
+    {{"@type": "Question", "name": "How much does it cost?", "acceptedAnswer": {{"@type": "Answer", "text": "{_PRECIO_BADGE_EN}, flat, for a limited launch window. You only pay once you've approved the lyrics - nothing before that."}}}}
   ]
 }}
 </script>
@@ -1214,7 +1214,7 @@ ___GOOGLE_ADS_SCRIPT___
     <div class="note"><p class="note-q">How fast will it actually arrive?</p><p class="note-a">Usually within a few minutes of paying. It shows up right on this page, plus a backup copy by email.</p></div>
     <div class="note"><p class="note-q">Is it really one-of-a-kind?</p><p class="note-a">Yes — every song is written from scratch, based on your story. No templates, no stock lyrics, no reused lines.</p></div>
     <div class="note"><p class="note-q">Is this AI-generated?</p><p class="note-a">Yes — the music and vocals are composed by AI from the story you give us, and you write the details together with our writer in the chat. You approve the lyrics before anything is produced. It's surprisingly good at capturing a real story - that's the whole idea.</p></div>
-    <div class="note"><p class="note-q">What does it cost?</p><p class="note-a">___PRECIO_BADGE_DYNAMIC___ for a limited launch window (see the price above). You only pay once you've approved the lyrics.</p></div>
+    <div class="note"><p class="note-q">How much does it cost?</p><p class="note-a">___PRECIO_BADGE_DYNAMIC___ for a limited launch window (see the price above). You only pay once you've approved the lyrics.</p></div>
   </section>
 
   <footer>
