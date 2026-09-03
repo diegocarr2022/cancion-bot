@@ -1424,15 +1424,48 @@ async function retomarSesion() {
   const resp = await fetch("/web/status?session_id=" + encodeURIComponent(sessionId));
   if (!resp.ok) return false;
   const data = await resp.json();
-  if (data.delivered && data.audio_urls && data.audio_urls.length) { mostrarDescarga(data.audio_urls, data.final_title); return true; }
+  if (data.delivered && data.audio_urls && data.audio_urls.length) { mostrarDescarga(data.audio_urls, data.final_title, data.amount_mxn, data.currency); return true; }
   if (data.step === "generando" || data.paid) { $("estado-box").style.display = "block"; iniciarPolling(); return true; }
   if (data.step === "esperando_pago" && data.stripe_client_secret) { montarStripe(data.stripe_client_secret, data.email); $("pago-box").style.display = "block"; iniciarPolling(); return true; }
   return false;
 }
 
-function mostrarDescarga(audioUrls, titulo) {
+function mostrarDescarga(audioUrls, titulo, amount, currency) {
   $("estado-box").style.display = "none";
   $("pago-box").style.display = "none";
+
+  // ago 2026: evento "Purchase" del Pixel de Meta - se movio aca porque
+  // /pago-exitoso/web/{session_id} (donde vivia antes) solo lo visita el
+  // flujo VIEJO de PayPal con redireccion; Stripe embebido (el que se usa
+  // de verdad hoy) nunca navega ahi - el pago se confirma por webhook y el
+  // cliente se queda en esta misma pagina. Resultado real: desde que Stripe
+  // reemplazo a PayPal, Meta nunca habia recibido ni un solo evento de
+  // compra (confirmado revisando el historico completo de la cuenta de
+  // anuncios - cero, a pesar de gasto y ventas reales). La API de
+  // Conversiones del lado del servidor (mas precisa) sigue bloqueada por
+  // una restriccion de la cuenta de Meta Business de Diego sin resolver -
+  // esto es el respaldo del lado del navegador mientras tanto.
+  //
+  // mostrarDescarga() es el UNICO lugar al que llegan los 2 caminos que
+  // detectan "ya se entrego" (retomarSesion() al cargar la pagina si ya
+  // estaba pagado, e iniciarPolling() mientras el cliente espera) - por eso
+  // se dispara aca y no en cada uno de esos dos lugares por separado.
+  //
+  // localStorage evita contar la MISMA compra dos veces: si el cliente
+  // recarga la pagina o vuelve dias despues (por el link del correo de
+  // recuperacion, por ejemplo) y retomarSesion() vuelve a detectar
+  // delivered=true, no se debe volver a disparar el evento - ya se conto la
+  // primera vez que se mostro esta pantalla para este pedido.
+  try {
+    const yaContado = localStorage.getItem("tc_purchase_" + sessionId);
+    if (!yaContado && typeof fbq === "function") {
+      fbq('track', 'Purchase', {value: Number(amount) || 0, currency: currency || 'USD'}, {eventID: "web-" + sessionId});
+      localStorage.setItem("tc_purchase_" + sessionId, "1");
+    }
+  } catch (e) {
+    console.error("Error al disparar el pixel de Purchase:", e);
+  }
+
   const cont = $("links-descarga");
   cont.innerHTML = "";
 
@@ -1584,7 +1617,7 @@ function iniciarPolling() {
     const resp = await fetch("/web/status?session_id=" + encodeURIComponent(sessionId));
     const data = await resp.json();
     if (data.step === "generando" || data.paid) { $("pago-box").style.display = "none"; $("estado-box").style.display = "block"; }
-    if (data.delivered && data.audio_urls && data.audio_urls.length) { clearInterval(pollTimer); mostrarDescarga(data.audio_urls, data.final_title); }
+    if (data.delivered && data.audio_urls && data.audio_urls.length) { clearInterval(pollTimer); mostrarDescarga(data.audio_urls, data.final_title, data.amount_mxn, data.currency); }
   }, 5000);
 }
 

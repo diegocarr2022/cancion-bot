@@ -436,6 +436,14 @@ async def web_status(session_id: str):
         "tier": order.get("tier", "song"),
         "video_status": order.get("video_status", "none"),
         "video_url": order.get("video_url"),
+        # ago 2026: monto/moneda real cobrados en ESTE pedido - usado por el
+        # pixel de Meta (fbq Purchase) en la landing en ingles para reportar
+        # el valor real de la venta (ver mostrarDescarga en landing.py). Se
+        # llama "amount_mxn" por historia (la columna nacio para MXN en el
+        # flujo ES), pero ya es generico - guarda el monto en la moneda real
+        # de cada pedido (USD, MXN, PEN, COP segun el caso).
+        "amount_mxn": order.get("amount_mxn"),
+        "currency": order.get("currency"),
     }
 
 
