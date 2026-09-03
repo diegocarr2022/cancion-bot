@@ -610,17 +610,29 @@ async def pago_exitoso_web(session_id: str, response: Response):
                 )
 
     # Evento "Purchase" del Pixel de Meta (lado del navegador) - se dispara
-    # en cuanto el cliente aterriza aca de vuelta desde la pasarela, que solo
-    # pasa tras un checkout aprobado. Es la unica forma de medir conversion
-    # que tenemos habilitada por ahora (ver pixel_script() en landing.py: la
-    # Conversions API server-side quedo bloqueada por una restriccion vieja
-    # en la cuenta de Meta Business de Diego, sin resolver todavia).
+    # en cuanto el cliente aterriza aca de vuelta desde la pasarela. Con
+    # Stripe embebido esto YA NO es el camino normal (el pago se confirma
+    # sin salir de la pagina - ver mostrarDescarga() en landing.py, que es
+    # donde se dispara este mismo evento para el caso normal) - esta ruta
+    # solo se sigue visitando cuando el banco exige 3D Secure/autenticacion
+    # extra, que si redirige de verdad. Se guarda con la MISMA llave de
+    # localStorage que usa mostrarDescarga() (tc_purchase_<session_id>) para
+    # que sea mutuamente excluyente con ese otro disparo - sin esto, una
+    # venta con 3D Secure se contaria dos veces (aca al volver del banco, y
+    # de nuevo en mostrarDescarga cuando el cliente vea la pantalla de
+    # entrega). Es la unica forma de medir conversion que tenemos habilitada
+    # por ahora (ver pixel_script() en landing.py: la Conversions API
+    # server-side quedo bloqueada por una restriccion vieja en la cuenta de
+    # Meta Business de Diego, sin resolver todavia).
+    _purchase_key = f"tc_purchase_{session_id}"
     pixel_html = pixel_script(
-        "fbq('track', 'Purchase', {value: %s, currency: %s}, {eventID: %s});"
+        "if (!localStorage.getItem(%s)) { fbq('track', 'Purchase', {value: %s, currency: %s}, {eventID: %s}); localStorage.setItem(%s, '1'); }"
         % (
+            repr(_purchase_key),
             repr(float(order.get("amount_mxn") or 0)),
             repr(order.get("currency") or "MXN"),
             repr(f"web-{session_id}"),
+            repr(_purchase_key),
         ),
         noscript_ev="Purchase",
     )
