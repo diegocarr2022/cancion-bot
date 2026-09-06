@@ -10,7 +10,11 @@ load_dotenv()
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 ACEDATACLOUD_API_TOKEN = os.environ["ACEDATACLOUD_API_TOKEN"]
-ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
+# Ya no se usa (2026-09-06: el chat se migro de Anthropic directo a
+# AceDataCloud, ver app/claude_client.py) - opcional para que el servidor no
+# truene al arrancar si Diego la borra de Render pensando que ya no hace
+# falta.
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 BASE_URL = os.environ.get("BASE_URL", "").rstrip("/")
 DB_PATH = os.environ.get("DB_PATH", "/data/orders.db")
 

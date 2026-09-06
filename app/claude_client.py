@@ -11,18 +11,19 @@ etapas distintas (con distinto system prompt y herramientas cada una):
 """
 import httpx
 
-from app.config import ACEDATACLOUD_API_TOKEN, ANTHROPIC_API_KEY
+from app.config import ACEDATACLOUD_API_TOKEN
 
-ANTHROPIC_API = "https://api.anthropic.com/v1/messages"
-
-# AceDataCloud revende acceso a Claude mas barato (~/3 del precio oficial de
-# Anthropic para claude-sonnet-5, ver comparacion hecha antes de migrar) y
-# permite consolidar la facturacion en el mismo proveedor que ya usamos para
-# Suno (ver app/suno_client.py). Documentan que el request/response de este
-# endpoint es identico al de la Messages API real de Anthropic - por eso
-# send_chat() de aca abajo no cambia nada mas que la URL y el header de auth.
-# Verificado con una llamada real (ver /admin/test-acedatacloud) antes de
-# apuntar aca el trafico real de clientes.
+# Antes se llamaba a Anthropic directo (ANTHROPIC_API = "https://api.anthropic.com/v1/messages",
+# con headers x-api-key/anthropic-version). Se migro a AceDataCloud - mismo
+# proveedor que ya usamos para Suno (ver app/suno_client.py) - por costo
+# (~/3 del precio oficial de Anthropic para claude-sonnet-5: $0.60/$3.00 vs
+# $2/$10 por 1M tokens input/output) y para consolidar toda la facturacion
+# del web app en un solo lugar. Antes de este cambio se verifico con
+# llamadas reales (ver test_acedatacloud_connection() mas abajo, corridas
+# via /admin/test-acedatacloud) que el formato de respuesta es compatible:
+# bloques "text" y "tool_use" con la forma exacta que espera este codigo, y
+# que el eco de un bloque "thinking" no solicitado (que AceDataCloud agrega
+# por su cuenta) no rompe una conversacion de varios turnos.
 ACEDATACLOUD_MESSAGES_API = "https://api.acedata.cloud/v1/messages"
 
 
@@ -31,22 +32,14 @@ async def send_chat(messages: list, system: str, tools: list) -> dict:
     messages ya viene en el formato que espera la API de Anthropic
     (lista de {"role": "user"|"assistant", "content": ...}). Devuelve la
     respuesta cruda de la API (incluye response["content"], una lista de
-    bloques que pueden ser de tipo "text" y/o "tool_use").
-
-    NOTA (2026-09-05): esta funcion corre TODO el trafico real de clientes
-    (web EN/ES + Telegram) - por eso, aunque ya se agrego mas abajo el
-    cliente de AceDataCloud (test_acedatacloud_connection), esta funcion
-    sigue apuntando a Anthropic directo hasta confirmar con una llamada real
-    (via /admin/test-acedatacloud) que el formato de respuesta de
-    AceDataCloud es realmente compatible - recien despues de esa
-    verificacion se cambia esta funcion, en un commit aparte.
+    bloques que pueden ser de tipo "text" y/o "tool_use") - corre via
+    AceDataCloud, ver nota arriba.
     """
     async with httpx.AsyncClient(timeout=90) as client:
         resp = await client.post(
-            ANTHROPIC_API,
+            ACEDATACLOUD_MESSAGES_API,
             headers={
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
+                "Authorization": f"Bearer {ACEDATACLOUD_API_TOKEN}",
                 "content-type": "application/json",
             },
             json={
