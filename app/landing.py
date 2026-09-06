@@ -58,6 +58,7 @@ from app.config import (
     PRECIO_USD_SONG_REGULAR,
     DEDICATION_MAX_CHARS,
     LANDING_FLOW,
+    VALOR_PERCIBIDO_TEXTO_USD,
     get_precio_pais,
 )
 
@@ -758,6 +759,17 @@ _META_PIXEL_SCRIPT_EN = pixel_script("fbq('track', 'PageView');")
 # de abajo palabra por palabra - si cambia el FAQ visible, hay que actualizar
 # esto tambien), y Organization. No depende del dominio estar conectado
 # todavia - BASE_URL ya viene armado desde config.py.
+# sep 2026: FAQ del video de dedicatoria - solo landing_flow="v2" (ver
+# config.py). Se arma aparte para insertarla (o no) en el array
+# "mainEntity" de abajo sin duplicar todo el JSON-LD por dos versiones.
+_FAQ_VIDEO_ITEMS_EN = (
+    ""
+    if LANDING_FLOW != "v2"
+    else """,
+    {"@type": "Question", "name": "What happens to my photos after the video is made?", "acceptedAnswer": {"@type": "Answer", "text": "Your photos are not stored on our servers - temporary files are automatically deleted as soon as your video finishes rendering."}},
+    {"@type": "Question", "name": "Could someone see or use my photos?", "acceptedAnswer": {"@type": "Answer", "text": "No - the whole process is fully automated with no human involvement, and your photos are deleted the moment the video is done."}}"""
+)
+
 _JSON_LD_EN = f"""
 <script type="application/ld+json">
 {{
@@ -784,7 +796,7 @@ _JSON_LD_EN = f"""
     {{"@type": "Question", "name": "How fast will it actually arrive?", "acceptedAnswer": {{"@type": "Answer", "text": "Usually within a few minutes of paying. It shows up right on this page, plus a backup copy by email."}}}},
     {{"@type": "Question", "name": "Is it really one-of-a-kind?", "acceptedAnswer": {{"@type": "Answer", "text": "Yes - every song is written from scratch, based on your story. No templates, no stock lyrics, no reused lines."}}}},
     {{"@type": "Question", "name": "Is this AI-generated?", "acceptedAnswer": {{"@type": "Answer", "text": "Yes - the music and vocals are composed by AI from the story you give us, and you approve the lyrics before anything is produced."}}}},
-    {{"@type": "Question", "name": "How much does it cost?", "acceptedAnswer": {{"@type": "Answer", "text": "{_PRECIO_BADGE_EN}, flat, for a limited launch window. You only pay once you've approved the lyrics - nothing before that."}}}}
+    {{"@type": "Question", "name": "How much does it cost?", "acceptedAnswer": {{"@type": "Answer", "text": "{_PRECIO_BADGE_EN}, flat, for a limited launch window. You only pay once you've approved the lyrics - nothing before that."}}}}{_FAQ_VIDEO_ITEMS_EN}
   ]
 }}
 </script>
@@ -983,6 +995,14 @@ ___GOOGLE_ADS_SCRIPT___
   #btn-video-crear { width: 100%; margin-top: 8px; }
   .video-error { color: #b3441f; font-size: 13px; margin: 8px 0 0; }
   #video-ready-download { display: inline-block; margin-top: 12px; padding: 15px 28px; background: var(--rec); color: #fff5ee; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; }
+
+  /* sep 2026: bloque "What's included" (solo landing_flow=v2) - a proposito
+     mas llamativo que el resto del hero (fondo amber, no paper/ink) para que
+     de verdad se note el valor agregado, como pidio Diego. */
+  .whats-included { background: var(--amber); color: var(--ink); border-radius: 16px; padding: 18px 22px; margin: 18px auto 0; max-width: 420px; text-align: left; }
+  .wi-title { margin: 0 0 8px; font-weight: 800; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .wi-item { margin: 0 0 6px; font-size: 14.5px; font-weight: 600; }
+  .wi-value { margin: 10px 0 0; font-weight: 800; font-size: 15px; border-top: 1px solid rgba(22,17,13,0.2); padding-top: 10px; }
   #pago-box a, #descarga-box a { display: inline-block; margin-top: 12px; padding: 15px 28px; background: var(--rec); color: #fff5ee; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; }
   #preview-player-container audio { width: 100%; margin: 4px 0 16px; }
   .descarga-aviso { background: #fff3e8; border: 1px solid #f2c9a0; border-radius: 10px; padding: 10px 14px; font-size: 14px; color: #7a4a1e; margin: 0 0 14px; }
@@ -1074,13 +1094,15 @@ ___GOOGLE_ADS_SCRIPT___
     </div>
 
     <h1>A gift that<br><em>never existed</em><br>until now.</h1>
-    <p class="sub">The most unique gift you'll ever give - a real song written and sung from your story. You approve every lyric before you pay a cent.</p>
+    <p class="sub">The most unique gift you'll ever give - a real song written and sung from your story. You approve every lyric before anything is recorded - then listen to a real 45-second preview of your finished song while you decide to pay.</p>
 
     <div class="price-row">
       <span class="price-was">___PRECIO_BADGE_WAS_DYNAMIC___</span>
       <span class="price-now">___PRECIO_BADGE_DYNAMIC___</span>
       <span class="price-label">launch price</span>
     </div>
+
+    ___WHATS_INCLUDED_BLOCK___
 
     <div class="odometer">
       <p class="odo-caption" style="position:absolute; margin-top:-26px;">launch price ends in</p>
@@ -1096,7 +1118,6 @@ ___GOOGLE_ADS_SCRIPT___
     <div class="trust-row">
       <span class="trust-pill">Approved before you pay</span>
       <span class="trust-pill">Ready in minutes</span>
-      ___VIDEO_INCLUDED_PILL___
     </div>
 
     <div class="tag-row">
@@ -1121,7 +1142,7 @@ ___GOOGLE_ADS_SCRIPT___
     </div>
     <div class="track">
       <div class="track-num">03</div>
-      <div class="track-body"><h3>It gets recorded</h3><p>Studio-quality vocals and instruments, AI-composed around your exact words.</p></div>
+      <div class="track-body"><h3>It gets recorded</h3><p>___PASO_3_TEXTO___</p></div>
     </div>
     <div class="track">
       <div class="track-num">04</div>
@@ -1293,6 +1314,7 @@ ___GOOGLE_ADS_SCRIPT___
     <div class="note"><p class="note-q">Is it really one-of-a-kind?</p><p class="note-a">Yes — every song is written from scratch, based on your story. No templates, no stock lyrics, no reused lines.</p></div>
     <div class="note"><p class="note-q">Is this AI-generated?</p><p class="note-a">Yes — the music and vocals are composed by AI from the story you give us, and you write the details together with our writer in the chat. You approve the lyrics before anything is produced. It's surprisingly good at capturing a real story - that's the whole idea.</p></div>
     <div class="note"><p class="note-q">How much does it cost?</p><p class="note-a">___PRECIO_BADGE_DYNAMIC___ for a limited launch window (see the price above). You only pay once you've approved the lyrics.</p></div>
+    ___FAQ_VIDEO_BLOQUE___
   </section>
 
   <footer>
@@ -1951,12 +1973,39 @@ LANDING_HTML_EN = LANDING_HTML_EN.replace("___PRECIO_BADGE___", _PRECIO_BADGE_EN
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___DEDICATION_MAX_CHARS___", str(DEDICATION_MAX_CHARS))
 # sep 2026: LANDING_FLOW se lee UNA VEZ al importar (igual que el resto de
 # esta pagina) - Diego cambia de flujo redeployando con la variable de
-# entorno distinta, no hay split de trafico en vivo. "v2" agrega este pill
-# adelantando el video incluido; "v1" lo deja vacio (sin cambios visibles).
-_VIDEO_INCLUDED_PILL_EN = (
-    '<span class="trust-pill">🎬 + free video with your photos</span>' if LANDING_FLOW == "v2" else ""
-)
-LANDING_HTML_EN = LANDING_HTML_EN.replace("___VIDEO_INCLUDED_PILL___", _VIDEO_INCLUDED_PILL_EN)
+# entorno distinta, no hay split de trafico en vivo. Diego fue explicito:
+# si no se anuncia el video desde el inicio de la landing, no incide en la
+# decision de compra - por eso este bloque va ARRIBA, debajo del precio,
+# bien visible, no escondido en el chat o en el FAQ.
+if LANDING_FLOW == "v2":
+    _WHATS_INCLUDED_BLOCK_EN = f"""<div class="whats-included">
+      <p class="wi-title">What's included</p>
+      <p class="wi-item">✓ A professional, personalized song</p>
+      <p class="wi-item">✓ For a limited time: a vertical video of your song, made with your own photos</p>
+      <p class="wi-item">✓ A printable copy of your lyrics</p>
+      <p class="wi-value">{VALOR_PERCIBIDO_TEXTO_USD} value - yours today for ___PRECIO_BADGE_DYNAMIC___</p>
+    </div>"""
+    _PASO_3_TEXTO_EN = (
+        "Studio-quality vocals and instruments, AI-composed around your exact "
+        "words - and for a limited time, we turn it into a video with your own "
+        "photos too."
+    )
+    _FAQ_VIDEO_BLOQUE_EN = (
+        '<div class="note"><p class="note-q">What happens to my photos after the video is made?</p>'
+        '<p class="note-a">Your photos are not stored on our servers - temporary files are '
+        'automatically deleted as soon as your video finishes rendering.</p></div>'
+        '<div class="note"><p class="note-q">Could someone see or use my photos?</p>'
+        '<p class="note-a">No - the whole process is fully automated with no human involvement, '
+        "and your photos are deleted the moment the video is done.</p></div>"
+    )
+else:
+    _WHATS_INCLUDED_BLOCK_EN = ""
+    _PASO_3_TEXTO_EN = "Studio-quality vocals and instruments, AI-composed around your exact words."
+    _FAQ_VIDEO_BLOQUE_EN = ""
+
+LANDING_HTML_EN = LANDING_HTML_EN.replace("___WHATS_INCLUDED_BLOCK___", _WHATS_INCLUDED_BLOCK_EN)
+LANDING_HTML_EN = LANDING_HTML_EN.replace("___PASO_3_TEXTO___", _PASO_3_TEXTO_EN)
+LANDING_HTML_EN = LANDING_HTML_EN.replace("___FAQ_VIDEO_BLOQUE___", _FAQ_VIDEO_BLOQUE_EN)
 
 # ___PRECIO_BADGE_DYNAMIC___/___PRECIO_BADGE_WAS_DYNAMIC___ (badge, boton,
 # FAQ, JS) quedan A PROPOSITO sin resolver aca - los sustituye /cancion en

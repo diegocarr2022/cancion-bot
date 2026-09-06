@@ -35,6 +35,12 @@ MEDIA_SERVICE_TOKEN = os.environ.get("MEDIA_SERVICE_TOKEN", "")
 # trafico automatico - Diego decide cual esta viva en cada momento. ---
 LANDING_FLOW = os.environ.get("LANDING_FLOW", "v1").strip().lower()
 DEDICATION_MAX_CHARS = int(os.environ.get("DEDICATION_MAX_CHARS", "220"))
+# "Valor percibido" para el bloque "What's included" de la landing (v2) -
+# cancion + video + PDF de letra, comparado contra el precio real que se
+# cobra. Es un numero de marketing (nunca se cobra de verdad), no depende
+# del pais/moneda detectada - se muestra siempre en USD junto al precio
+# real (que si es dinamico, ver ___PRECIO_BADGE_DYNAMIC___ en landing.py).
+VALOR_PERCIBIDO_TEXTO_USD = os.environ.get("VALOR_PERCIBIDO_TEXTO_USD", "$49.99")
 
 # --- dLocal Go ---
 DLOCAL_API_KEY = os.environ["DLOCAL_API_KEY"]
