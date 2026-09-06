@@ -134,10 +134,11 @@ async def enviar_recordatorio_resena(destinatario: str, titulo: str, review_url:
 
 
 async def enviar_video_por_correo(destinatario: str, titulo: str, video_url: str, language: str = "es") -> bool:
-    """Fase 2 (upsell de video, ver app/video_client.py): correo separado del
-    de la cancion porque el video puede terminar bastante despues (el render
-    arranca recien cuando el cliente sube las fotos, que puede ser minutos u
-    horas despues de que ya se mando el correo del audio)."""
+    """Video de dedicatoria incluido en landing_flow="v2" (ver app/media_client.py,
+    NO es un upsell pagado) - correo separado del de la cancion porque el
+    video puede terminar bastante despues (el render arranca recien cuando
+    el cliente sube las fotos, que puede ser minutos u horas despues de que
+    ya se mando el correo del audio)."""
     if not MAILGUN_API_KEY or not MAILGUN_DOMAIN:
         log.warning(
             "MAILGUN_API_KEY/MAILGUN_DOMAIN no configurados - se omite el correo de "

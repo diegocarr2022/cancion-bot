@@ -9,7 +9,7 @@ import httpx
 import re
 from datetime import datetime
 
-from fastapi import FastAPI, Request, Header, HTTPException, Depends, Form
+from fastapi import FastAPI, Request, Header, HTTPException, Depends, Form, File, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, PlainTextResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
@@ -49,6 +49,7 @@ from app.email_client import (
     enviar_recordatorio_resena,
     enviar_correo_de_prueba,
     enviar_correo_recuperacion,
+    enviar_video_por_correo,
 )
 from app.landing import (
     LANDING_HTML_ES,
@@ -153,12 +154,13 @@ async def startup():
     _spawn(poll_review_reminder_loop())
     _spawn(poll_recovery_email_loop())
     _spawn(poll_web_preview_loop())
+    _spawn(poll_web_video_render_loop())
     log.info(
         "Loops de background arrancados: poll_suno_tasks_loop, "
         "poll_pending_payments_loop, poll_stuck_generation_loop, "
         "poll_web_suno_tasks_loop, poll_web_pending_payments_loop, "
         "poll_review_reminder_loop, poll_recovery_email_loop, "
-        "poll_web_preview_loop"
+        "poll_web_preview_loop, poll_web_video_render_loop"
     )
 
 
@@ -439,13 +441,14 @@ async def web_status(session_id: str):
         "email": order.get("email"),
         "gateway": order.get("gateway"),
         "final_title": order.get("final_title"),
-        # tier/video_status/video_url: usados por el frontend en ingles para
-        # saber si tiene que mostrar el widget de subida de fotos y, mas
-        # adelante, el link de descarga del video (Fase 2 - ver
-        # app/video_client.py). video_status queda en "none" para pedidos
-        # tier="song", asi que la landing en espanol nunca ve estos campos
-        # con un valor distinto al que ya ignora hoy.
+        # landing_flow/video_status/video_url: usados por el frontend en
+        # ingles para saber si tiene que ofrecer el video de dedicatoria
+        # (solo landing_flow="v2", ver LANDING_FLOW en config.py y
+        # app/media_client.py). video_status queda en "none" para cualquier
+        # otro pedido (v1, o cualquier pedido en espanol), asi que esos
+        # nunca ven la oferta.
         "tier": order.get("tier", "song"),
+        "landing_flow": order.get("landing_flow"),
         "video_status": order.get("video_status", "none"),
         "video_url": order.get("video_url"),
         # sep 2026 (EN): preview gratis del audio real, listo ANTES de pagar
@@ -461,7 +464,157 @@ async def web_status(session_id: str):
         # de cada pedido (USD, MXN, PEN, COP segun el caso).
         "amount_mxn": order.get("amount_mxn"),
         "currency": order.get("currency"),
+        "dedication_max_chars": DEDICATION_MAX_CHARS,
     }
+
+
+# ---------------------------------------------------------------------------
+# sep 2026: video de dedicatoria (solo landing_flow="v2") - se ofrece DESPUES
+# de que la cancion ya se entrego (no antes, no bloquea la venta principal).
+# Totalmente opcional para el cliente. Las 3 rutas siguen la misma secuencia
+# que ve el frontend: decision (si/no) -> subir fotos una por una -> arrancar
+# el render con la dedicatoria. Todas verifican landing_flow=="v2" server-side
+# - un pedido v1 o en espanol no puede llegar a estas rutas ni por error.
+# ---------------------------------------------------------------------------
+def _validar_pedido_v2(order: dict | None, *, requiere_status: str | None = None):
+    if not order:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    if (order.get("landing_flow") or "v1") != "v2":
+        raise HTTPException(status_code=400, detail="Este pedido no ofrece video")
+    if not order.get("delivered"):
+        raise HTTPException(status_code=400, detail="Todavia no se entrega la cancion")
+    if requiere_status and order.get("video_status") != requiere_status:
+        raise HTTPException(status_code=400, detail="Paso invalido para el estado actual del video")
+
+
+@app.post("/web/video/decision")
+async def web_video_decision(request: Request):
+    body = await request.json() if await request.body() else {}
+    session_id = body.get("session_id")
+    order = db.get_web_order(session_id) if session_id else None
+    _validar_pedido_v2(order)
+    quiere_video = bool(body.get("quiere_video"))
+    db.update_web_order(session_id, video_status="collecting" if quiere_video else "declined")
+    return {"ok": True}
+
+
+@app.post("/web/video/upload-photo")
+async def web_video_upload_photo(session_id: str = Form(...), file: UploadFile = File(...)):
+    import json as _json
+
+    order = db.get_web_order(session_id)
+    _validar_pedido_v2(order, requiere_status="collecting")
+
+    fotos = _json.loads(order.get("photos_json") or "[]")
+    if len(fotos) >= 10:
+        raise HTTPException(status_code=400, detail="Ya se alcanzo el maximo de 10 fotos")
+
+    contenido = await file.read()
+    try:
+        url = await media_client.subir_foto(file.filename or "photo.jpg", contenido, file.content_type)
+    except Exception:
+        log.exception("Error subiendo foto de video para session_id=%s", session_id)
+        raise HTTPException(status_code=502, detail="Error subiendo la foto, intenta de nuevo")
+
+    fotos.append(url)
+    db.update_web_order(session_id, photos_json=_json.dumps(fotos))
+    return {"ok": True, "count": len(fotos)}
+
+
+@app.post("/web/video/start")
+async def web_video_start(request: Request):
+    import json as _json
+
+    body = await request.json() if await request.body() else {}
+    session_id = body.get("session_id")
+    dedication = (body.get("dedication_text") or "").strip()
+
+    order = db.get_web_order(session_id) if session_id else None
+    _validar_pedido_v2(order, requiere_status="collecting")
+
+    if not dedication:
+        raise HTTPException(status_code=400, detail="Falta la dedicatoria")
+    if len(dedication) > DEDICATION_MAX_CHARS:
+        raise HTTPException(
+            status_code=400, detail=f"La dedicatoria no puede pasar de {DEDICATION_MAX_CHARS} caracteres",
+        )
+    fotos = _json.loads(order.get("photos_json") or "[]")
+    if not fotos:
+        raise HTTPException(status_code=400, detail="Falta subir al menos una foto")
+    audio_urls = _json.loads(order.get("audio_urls") or "[]")
+    if not audio_urls:
+        raise HTTPException(status_code=400, detail="Todavia no esta lista la cancion")
+
+    try:
+        job_id = await media_client.solicitar_video(
+            audio_url=audio_urls[0], lyric_text=order.get("final_lyric") or "",
+            dedication_text=dedication, image_urls=fotos,
+        )
+    except Exception:
+        log.exception("Error arrancando el render del video para session_id=%s", session_id)
+        raise HTTPException(status_code=502, detail="Error arrancando el video, intenta de nuevo")
+
+    db.update_web_order(
+        session_id, dedication_text=dedication, video_job_id=job_id, video_status="renderizando",
+    )
+    return {"ok": True}
+
+
+async def poll_web_video_render_loop():
+    """Video de dedicatoria en curso (video_status='renderizando') - consulta
+    el job en el servicio de media (droplet, tunecraft-media-services) hasta
+    que termine, y manda el correo de entrega del video (separado del correo
+    de la cancion, que ya se mando antes)."""
+    while True:
+        try:
+            pendientes = db.find_web_orders_video_renderizando()
+            log.info(
+                "[poll_web_video_render_loop] tick - %d video(s) renderizando - mem=%.1fMB",
+                len(pendientes), _memoria_mb(),
+            )
+            for order in pendientes:
+                await check_and_deliver_video(order)
+        except Exception:
+            log.exception("Error en el loop de render de video (web)")
+        await asyncio.sleep(POLL_INTERVAL_SECONDS)
+
+
+async def check_and_deliver_video(order: dict):
+    session_id = order["session_id"]
+    try:
+        estado = await media_client.estado_video(order["video_job_id"])
+    except Exception:
+        log.exception("Error consultando estado del video para session_id=%s", session_id)
+        return
+
+    status = estado.get("status")
+    if status in ("pending", "processing"):
+        return  # se sigue esperando, se reintenta en el proximo tick
+
+    if status == "failed":
+        log.error(
+            "El render de video fallo para session_id=%s: %s", session_id, estado.get("error"),
+        )
+        db.update_web_order(session_id, video_status="fallido", video_error=estado.get("error"))
+        await send_message(
+            ADMIN_CHAT_ID,
+            f"⚠️ Fallo el render de video para un pedido web (email={order.get('email')}, "
+            f"session_id={session_id}): {estado.get('error')}",
+        )
+        return
+
+    if status != "done" or not estado.get("video_url"):
+        log.warning("Estado inesperado del video para session_id=%s: %r", session_id, estado)
+        return
+
+    video_url = estado["video_url"]
+    db.update_web_order(session_id, video_status="listo", video_url=video_url)
+
+    if order.get("email"):
+        await enviar_video_por_correo(
+            order["email"], order.get("final_title") or "Your song", video_url,
+            language=order.get("language", "en"),
+        )
 
 
 @app.post("/web/review-click")
@@ -1836,10 +1989,21 @@ async def check_and_deliver_web(order: dict):
         )
         return
 
-    if info["pendientes"] > 0 or not ready_items:
-        return
+    # sep 2026 (v2): esta variante entrega UNA sola version (ver decision de
+    # Diego - evita la confusion de "me gusto mas la otra version pero el
+    # video es de esta"), asi que no hace falta esperar a que ESTE lista la
+    # segunda - ya alcanza con la primera (la misma que sono en el preview).
+    # Esto ademas hace la entrega casi instantanea despues del pago, porque
+    # esa version ya estaba lista desde el preview.
+    if (order.get("landing_flow") or "v1") == "v2":
+        if not ready_items:
+            return
+        audio_urls = [ready_items[0]["audio_url"]]
+    else:
+        if info["pendientes"] > 0 or not ready_items:
+            return
+        audio_urls = [item["audio_url"] for item in ready_items]
 
-    audio_urls = [item["audio_url"] for item in ready_items]
     db.update_web_order(
         order["session_id"],
         delivered=1,

@@ -740,6 +740,16 @@ def find_unfinished_web_suno_tasks():
         return [dict(r) for r in rows]
 
 
+def find_web_orders_video_renderizando():
+    """Videos de dedicatoria en curso (landing_flow='v2') - ver
+    poll_web_video_render_loop en main.py."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM web_orders WHERE video_status = 'renderizando' AND video_job_id IS NOT NULL"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def find_unfinished_web_previews():
     """Pedidos EN (ver web_conversation._finalizar_letra) que ya aprobaron la
     letra y arrancaron la generacion real en Suno, pero TODAVIA NO pagaron -

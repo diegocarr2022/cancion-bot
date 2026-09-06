@@ -367,7 +367,9 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
     else:
         messages.append({"role": "user", "content": text})
 
-    system_prompt = build_web_content_system_prompt(precio["texto"], language=language)
+    system_prompt = build_web_content_system_prompt(
+        precio["texto"], language=language, landing_flow=order.get("landing_flow") or "v1",
+    )
     tools = WEB_CONTENT_TOOLS_EN if language == "en" else WEB_CONTENT_TOOLS
 
     for _ in range(MAX_TOOL_ROUNDS):

@@ -56,6 +56,8 @@ from app.config import (
     TRUSTPILOT_REVIEW_URL,
     STRIPE_API_KEY,
     PRECIO_USD_SONG_REGULAR,
+    DEDICATION_MAX_CHARS,
+    LANDING_FLOW,
     get_precio_pais,
 )
 
@@ -960,7 +962,27 @@ ___GOOGLE_ADS_SCRIPT___
   .punto:nth-child(3) { animation-delay: 0.4s; }
   @keyframes punto { 0%, 60%, 100% { opacity: 0.3; transform: scale(0.85); } 30% { opacity: 1; transform: scale(1); } }
 
-  #preview-box, #pago-box, #estado-box, #descarga-box { display: none; text-align: center; }
+  #preview-box, #pago-box, #estado-box, #descarga-box,
+  #video-offer-box, #video-form-box, #video-uploading-box, #video-rendering-box, #video-ready-box { display: none; text-align: center; }
+  #video-offer-box button, #video-form-box button { width: auto; }
+  #video-offer-box .btn-secundario { background: transparent; color: var(--paper-ink); border: 1px solid rgba(36,26,16,0.25); }
+  #video-form-box { text-align: left; }
+  #video-dedicatoria {
+    width: 100%; padding: 14px; border-radius: 12px; border: 1px solid rgba(36,26,16,0.15);
+    font-size: 15px; font-family: 'Work Sans', sans-serif; background: #fff; resize: vertical;
+  }
+  #video-fotos-input { display: block; margin: 10px 0; font-size: 13px; }
+  .video-fotos-grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+  .video-foto-thumb { position: relative; width: 64px; height: 64px; border-radius: 8px; overflow: hidden; }
+  .video-foto-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .video-foto-quitar {
+    position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; padding: 0;
+    border-radius: 50%; background: rgba(22,17,13,0.75); color: #fff; font-size: 13px;
+    line-height: 1; display: flex; align-items: center; justify-content: center;
+  }
+  #btn-video-crear { width: 100%; margin-top: 8px; }
+  .video-error { color: #b3441f; font-size: 13px; margin: 8px 0 0; }
+  #video-ready-download { display: inline-block; margin-top: 12px; padding: 15px 28px; background: var(--rec); color: #fff5ee; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; }
   #pago-box a, #descarga-box a { display: inline-block; margin-top: 12px; padding: 15px 28px; background: var(--rec); color: #fff5ee; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; }
   #preview-player-container audio { width: 100%; margin: 4px 0 16px; }
   .descarga-aviso { background: #fff3e8; border: 1px solid #f2c9a0; border-radius: 10px; padding: 10px 14px; font-size: 14px; color: #7a4a1e; margin: 0 0 14px; }
@@ -1074,6 +1096,7 @@ ___GOOGLE_ADS_SCRIPT___
     <div class="trust-row">
       <span class="trust-pill">Approved before you pay</span>
       <span class="trust-pill">Ready in minutes</span>
+      ___VIDEO_INCLUDED_PILL___
     </div>
 
     <div class="tag-row">
@@ -1161,6 +1184,52 @@ ___GOOGLE_ADS_SCRIPT___
         We also sent it to your email as a backup.
       </p>
       ___REVIEW_BLOCK___
+    </div>
+
+    <!-- sep 2026: video de dedicatoria (fotos del cliente + su cancion),
+         INCLUIDO en el mismo precio - solo se activa server-side cuando
+         landing_flow="v2" (ver /web/status en main.py). Un pedido v1 nunca
+         ve ninguna de estas cajas: mostrarDescarga() solo las revela si
+         data.landing_flow === "v2". -->
+    <div class="player" id="video-offer-box">
+      <p style="margin-top:0;">🎬 Want a video of your song, made with your own photos? It's included in what you already paid - completely free.</p>
+      <div class="fila-input" style="justify-content:center; gap:10px;">
+        <button id="btn-video-si" type="button">Yes, let's make it</button>
+        <button id="btn-video-no" type="button" class="btn-secundario">No thanks</button>
+      </div>
+    </div>
+
+    <div class="player" id="video-form-box">
+      <p style="margin-top:0;">Write a short dedication - it opens the video.</p>
+      <textarea id="video-dedicatoria" rows="3" maxlength="___DEDICATION_MAX_CHARS___" placeholder="For the love of my life..."></textarea>
+      <p id="video-dedicatoria-contador" style="font-size:12px; color:var(--paper-ink-soft); text-align:right; margin:2px 0 14px;">0 / ___DEDICATION_MAX_CHARS___</p>
+
+      <p style="margin-bottom:6px;">Add 1 to 10 photos (vertical photos work best).</p>
+      <p style="font-size:12px; color:var(--paper-ink-soft); margin-top:0;">
+        Your photos are only used to make this video and are never stored on our servers - they're deleted automatically once your video is ready.
+      </p>
+      <input id="video-fotos-input" type="file" accept="image/*" multiple>
+      <div id="video-fotos-preview" class="video-fotos-grid"></div>
+
+      <button id="btn-video-crear" type="button" disabled>Create my video</button>
+      <p id="video-form-error" class="video-error"></p>
+    </div>
+
+    <div class="player" id="video-uploading-box">
+      <p style="margin-top:0;"><span class="spinner"></span>Uploading your photos...</p>
+    </div>
+
+    <div class="player" id="video-rendering-box">
+      <p style="margin-top:0;"><span class="spinner"></span>Making your video - this takes a few minutes...</p>
+      <p style="font-size:12px; color:var(--paper-ink-soft); margin-bottom:0;">
+        We'll email it to you too, so feel free to close this tab.
+      </p>
+    </div>
+
+    <div class="player" id="video-ready-box">
+      <p style="margin-top:0;">🎬 Your video is ready!</p>
+      <video id="video-ready-player" controls style="width:100%; border-radius:10px;"></video>
+      <a id="video-ready-download" href="#" download>⬇ Download video</a>
     </div>
   </section>
 
@@ -1433,7 +1502,7 @@ async function retomarSesion() {
   const resp = await fetch("/web/status?session_id=" + encodeURIComponent(sessionId));
   if (!resp.ok) return false;
   const data = await resp.json();
-  if (data.delivered && data.audio_urls && data.audio_urls.length) { mostrarDescarga(data.audio_urls, data.final_title, data.amount_mxn, data.currency); return true; }
+  if (data.delivered && data.audio_urls && data.audio_urls.length) { mostrarDescarga(data.audio_urls, data.final_title, data.amount_mxn, data.currency); manejarVideoTrasEntrega(data); return true; }
   if (data.step === "generando" || data.paid) { $("estado-box").style.display = "block"; iniciarPolling(); return true; }
   if (data.step === "esperando_pago" && data.stripe_client_secret) { mostrarPreviewYPago(data.preview_url, data.stripe_client_secret, data.email); iniciarPolling(); return true; }
   if (data.step === "generando_preview") { $("preview-box").style.display = "block"; iniciarPolling(); return true; }
@@ -1673,9 +1742,152 @@ function iniciarPolling() {
       $("pago-box").style.display = "none";
       $("estado-box").style.display = "block";
     }
-    if (data.delivered && data.audio_urls && data.audio_urls.length) { clearInterval(pollTimer); mostrarDescarga(data.audio_urls, data.final_title, data.amount_mxn, data.currency); }
+    if (data.delivered && data.audio_urls && data.audio_urls.length) { clearInterval(pollTimer); mostrarDescarga(data.audio_urls, data.final_title, data.amount_mxn, data.currency); manejarVideoTrasEntrega(data); }
   }, 5000);
 }
+
+// ---------------------------------------------------------------------------
+// sep 2026: video de dedicatoria (fotos + cancion), incluido en landing_flow
+// "v2" - se ofrece recien despues de mostrarDescarga() (la cancion ya se
+// entrego), nunca antes. Un pedido v1 nunca ve nada de esto (landing_flow
+// !== "v2" corta todo de una).
+// ---------------------------------------------------------------------------
+let fotosSeleccionadas = [];
+let pollVideoTimer = null;
+
+function manejarVideoTrasEntrega(data) {
+  if (data.landing_flow !== "v2") return;
+  const status = data.video_status || "none";
+  if (status === "none") {
+    $("video-offer-box").style.display = "block";
+  } else if (status === "collecting") {
+    $("video-form-box").style.display = "block";
+  } else if (status === "renderizando") {
+    $("video-rendering-box").style.display = "block";
+    iniciarPollingVideo();
+  } else if (status === "listo" && data.video_url) {
+    mostrarVideoListo(data.video_url);
+  }
+  // "declined" (el cliente ya dijo que no) y "fallido" (raro - se atiende
+  // manual) no muestran ninguna caja nueva.
+}
+
+function mostrarVideoListo(videoUrl) {
+  $("video-offer-box").style.display = "none";
+  $("video-form-box").style.display = "none";
+  $("video-uploading-box").style.display = "none";
+  $("video-rendering-box").style.display = "none";
+  const player = $("video-ready-player");
+  if (player.getAttribute("src") !== videoUrl) player.src = videoUrl;
+  $("video-ready-download").href = videoUrl;
+  $("video-ready-box").style.display = "block";
+}
+
+function iniciarPollingVideo() {
+  if (pollVideoTimer) return;
+  pollVideoTimer = setInterval(async () => {
+    const resp = await fetch("/web/status?session_id=" + encodeURIComponent(sessionId));
+    const data = await resp.json();
+    if (data.video_status === "listo" && data.video_url) {
+      clearInterval(pollVideoTimer);
+      mostrarVideoListo(data.video_url);
+    } else if (data.video_status === "fallido") {
+      clearInterval(pollVideoTimer);
+      $("video-rendering-box").style.display = "none";
+      $("video-rendering-box").insertAdjacentHTML(
+        "afterend",
+        '<p class="video-error" style="text-align:center;">Something went wrong making your video - we\\'re looking into it and will follow up by email.</p>',
+      );
+    }
+  }, 8000);
+}
+
+$("btn-video-si").addEventListener("click", async () => {
+  $("video-offer-box").style.display = "none";
+  $("video-form-box").style.display = "block";
+  fetch("/web/video/decision", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({session_id: sessionId, quiere_video: true}),
+  }).catch(() => {});
+});
+
+$("btn-video-no").addEventListener("click", () => {
+  $("video-offer-box").style.display = "none";
+  fetch("/web/video/decision", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({session_id: sessionId, quiere_video: false}),
+  }).catch(() => {});
+});
+
+function actualizarBotonCrearVideo() {
+  const dedicacion = $("video-dedicatoria").value.trim();
+  $("btn-video-crear").disabled = !(dedicacion.length > 0 && fotosSeleccionadas.length > 0);
+}
+
+$("video-dedicatoria").addEventListener("input", () => {
+  $("video-dedicatoria-contador").textContent = $("video-dedicatoria").value.length + " / ___DEDICATION_MAX_CHARS___";
+  actualizarBotonCrearVideo();
+});
+
+function renderFotosPreview() {
+  const cont = $("video-fotos-preview");
+  cont.innerHTML = "";
+  fotosSeleccionadas.forEach((file, i) => {
+    const div = document.createElement("div");
+    div.className = "video-foto-thumb";
+    const img = document.createElement("img");
+    img.src = URL.createObjectURL(file);
+    const quitar = document.createElement("button");
+    quitar.type = "button";
+    quitar.className = "video-foto-quitar";
+    quitar.textContent = "×";
+    quitar.onclick = () => { fotosSeleccionadas.splice(i, 1); renderFotosPreview(); actualizarBotonCrearVideo(); };
+    div.appendChild(img);
+    div.appendChild(quitar);
+    cont.appendChild(div);
+  });
+}
+
+$("video-fotos-input").addEventListener("change", (e) => {
+  const nuevas = Array.from(e.target.files || []);
+  for (const f of nuevas) {
+    if (fotosSeleccionadas.length >= 10) break;
+    fotosSeleccionadas.push(f);
+  }
+  e.target.value = "";
+  renderFotosPreview();
+  actualizarBotonCrearVideo();
+});
+
+$("btn-video-crear").addEventListener("click", async () => {
+  const dedicacion = $("video-dedicatoria").value.trim();
+  if (!dedicacion || fotosSeleccionadas.length === 0) return;
+  $("video-form-box").style.display = "none";
+  $("video-uploading-box").style.display = "block";
+  $("video-form-error").textContent = "";
+  try {
+    for (const file of fotosSeleccionadas) {
+      const fd = new FormData();
+      fd.append("session_id", sessionId);
+      fd.append("file", file);
+      const resp = await fetch("/web/video/upload-photo", {method: "POST", body: fd});
+      if (!resp.ok) throw new Error("upload failed");
+    }
+    const resp2 = await fetch("/web/video/start", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({session_id: sessionId, dedication_text: dedicacion}),
+    });
+    if (!resp2.ok) throw new Error("start failed");
+    $("video-uploading-box").style.display = "none";
+    $("video-rendering-box").style.display = "block";
+    iniciarPollingVideo();
+  } catch (e) {
+    console.error("Error creando el video:", e);
+    $("video-uploading-box").style.display = "none";
+    $("video-form-box").style.display = "block";
+    $("video-form-error").textContent = "Something went wrong uploading - please try again.";
+  }
+});
 
 // Textarea que crece con el texto (en vez del <input> de una sola linea de
 // antes) - reportado como dificil de leer (el texto se salia
@@ -1736,6 +1948,15 @@ LANDING_HTML_EN = LANDING_HTML_EN.replace("___BRAND___", BRAND_NAME_EN)
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___STRIPE_PUBLISHABLE_KEY___", STRIPE_API_KEY)
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___PRECIO_BADGE_WAS___", _PRECIO_BADGE_WAS_EN)
 LANDING_HTML_EN = LANDING_HTML_EN.replace("___PRECIO_BADGE___", _PRECIO_BADGE_EN)
+LANDING_HTML_EN = LANDING_HTML_EN.replace("___DEDICATION_MAX_CHARS___", str(DEDICATION_MAX_CHARS))
+# sep 2026: LANDING_FLOW se lee UNA VEZ al importar (igual que el resto de
+# esta pagina) - Diego cambia de flujo redeployando con la variable de
+# entorno distinta, no hay split de trafico en vivo. "v2" agrega este pill
+# adelantando el video incluido; "v1" lo deja vacio (sin cambios visibles).
+_VIDEO_INCLUDED_PILL_EN = (
+    '<span class="trust-pill">🎬 + free video with your photos</span>' if LANDING_FLOW == "v2" else ""
+)
+LANDING_HTML_EN = LANDING_HTML_EN.replace("___VIDEO_INCLUDED_PILL___", _VIDEO_INCLUDED_PILL_EN)
 
 # ___PRECIO_BADGE_DYNAMIC___/___PRECIO_BADGE_WAS_DYNAMIC___ (badge, boton,
 # FAQ, JS) quedan A PROPOSITO sin resolver aca - los sustituye /cancion en

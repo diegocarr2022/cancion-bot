@@ -346,14 +346,33 @@ DELIVERY_TOOLS = [
 # esta pagado), se le muestra el boton de pago - la generacion en Suno recien
 # arranca cuando se confirma el pago (ver web_conversation.py).
 # ---------------------------------------------------------------------------
-def build_web_content_system_prompt(precio_texto: str, language: str = "es") -> str:
+_FLOW_NOTE_V1_EN = (
+    "once they pay, we always generate 2 different takes of the full song, "
+    "so they'll get both to enjoy/keep, not just one to choose from - a real "
+    "customer got confused thinking they had to pick only one"
+)
+_FLOW_NOTE_V2_EN = (
+    "once they pay and their song is ready, they'll have the option to turn "
+    "it into a video made with their own photos, completely included in "
+    "what they already paid for - totally optional, no extra charge, no "
+    "pressure at all if they'd rather just keep the song"
+)
+
+
+def build_web_content_system_prompt(precio_texto: str, language: str = "es", landing_flow: str = "v1") -> str:
     """El precio varia segun el pais del cliente (ver PAISES_SOPORTADOS en
     config.py) - por eso el prompt web es una funcion, no un string fijo, asi
     Claude siempre sabe el precio correcto de ESTE pedido en particular si el
     cliente pregunta cuanto cuesta. language selecciona entre la plantilla en
-    espanol (MX/PE/CO) o en ingles (EE.UU. - ver WEB_CONTENT_TOOLS_EN)."""
+    espanol (MX/PE/CO) o en ingles (EE.UU. - ver WEB_CONTENT_TOOLS_EN).
+
+    landing_flow (solo EN, ver LANDING_FLOW en config.py): "v1" sigue
+    mencionando las 2 versiones de audio (sin video); "v2" menciona el video
+    de fotos incluido en vez de las 2 versiones (esa variante solo entrega
+    UNA version de audio - ver check_and_deliver_web en main.py)."""
     template = _WEB_CONTENT_SYSTEM_PROMPT_TEMPLATE_EN if language == "en" else _WEB_CONTENT_SYSTEM_PROMPT_TEMPLATE
-    return template.format(precio_texto=precio_texto)
+    flow_note = _FLOW_NOTE_V2_EN if landing_flow == "v2" else _FLOW_NOTE_V1_EN
+    return template.format(precio_texto=precio_texto, flow_note=flow_note)
 
 
 _WEB_CONTENT_SYSTEM_PROMPT_TEMPLATE = """Eres un asistente calido y conversacional que ayuda a crear canciones
@@ -653,13 +672,11 @@ conversation. Your job is to:
    already - it only appears together with the preview, a little later, on
    its own, nothing else for them to do meanwhile. In this same message,
    briefly mention TWO more things (short, natural, not a bullet list - just
-   woven into the message): (a) once they pay, we always generate 2
-   different takes of the full song, so they'll get both to enjoy/keep, not
-   just one to choose from - a real customer got confused thinking they had
-   to pick only one; (b) if this window or tab closes for any reason before
-   they're done, they can just come back to this page, say they want to
-   recover a previous order, and give their email - that's enough to find it
-   again, no need to start over or lose their progress.
+   woven into the message): (a) {flow_note}; (b) if this window or tab
+   closes for any reason before they're done, they can just come back to
+   this page, say they want to recover a previous order, and give their
+   email - that's enough to find it again, no need to start over or lose
+   their progress.
 
 Important rules (VERY IMPORTANT, don't break them):
 - It's fine to say the real song is already being recorded/generated right
