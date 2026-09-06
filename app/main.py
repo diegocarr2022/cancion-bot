@@ -494,7 +494,18 @@ async def web_video_decision(request: Request):
     order = db.get_web_order(session_id) if session_id else None
     _validar_pedido_v2(order)
     quiere_video = bool(body.get("quiere_video"))
-    db.update_web_order(session_id, video_status="collecting" if quiere_video else "declined")
+    if quiere_video:
+        # sep 2026: se limpia photos_json cada vez que se (re)entra al paso
+        # de fotos - encontrado en el reintento real de Diego: si no se
+        # limpia, un "Try again" despues de un fallo deja las fotos VIEJAS
+        # (incluida la que causo el fallo) todavia guardadas, y las nuevas
+        # que suba se SUMAN a esas en vez de reemplazarlas - mismo fallo
+        # garantizado de nuevo. dedication_text SI se conserva (se
+        # precarga en el formulario, ver /web/status) porque no hay ningun
+        # motivo para perderla.
+        db.update_web_order(session_id, video_status="collecting", photos_json="[]")
+    else:
+        db.update_web_order(session_id, video_status="declined")
     return {"ok": True}
 
 
