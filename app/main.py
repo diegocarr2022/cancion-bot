@@ -38,6 +38,7 @@ from app.config import (
     TRUSTPILOT_REVIEW_URL,
     STRIPE_WEBHOOK_SECRET,
 )
+from app.claude_client import test_acedatacloud_connection
 from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
 from app.email_client import (
@@ -1064,6 +1065,18 @@ async def admin_test_email(request: Request, _: bool = Depends(_verificar_admin)
         raise HTTPException(status_code=400, detail="Falta 'to' (correo destino)")
     ok, detalle = await enviar_correo_de_prueba(destinatario)
     return {"ok": ok, "detalle": detalle}
+
+
+@app.post("/admin/test-acedatacloud")
+async def admin_test_acedatacloud(_: bool = Depends(_verificar_admin)):
+    """Llamada real y aislada a AceDataCloud (revendedor de Claude que
+    tambien usamos para Suno) para verificar EMPIRICAMENTE que su endpoint
+    /v1/messages responde con el mismo formato que la Messages API real de
+    Anthropic, antes de migrar send_chat() (usado por TODO el chat real de
+    clientes) hacia el en app/claude_client.py. No toca ningun flujo real -
+    solo sirve para inspeccionar la respuesta cruda una vez desplegado."""
+    resultado = await test_acedatacloud_connection()
+    return resultado
 
 
 @app.get("/admin/orden/web/{session_id}", response_class=HTMLResponse)

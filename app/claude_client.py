@@ -11,9 +11,19 @@ etapas distintas (con distinto system prompt y herramientas cada una):
 """
 import httpx
 
-from app.config import ANTHROPIC_API_KEY
+from app.config import ACEDATACLOUD_API_TOKEN, ANTHROPIC_API_KEY
 
 ANTHROPIC_API = "https://api.anthropic.com/v1/messages"
+
+# AceDataCloud revende acceso a Claude mas barato (~/3 del precio oficial de
+# Anthropic para claude-sonnet-5, ver comparacion hecha antes de migrar) y
+# permite consolidar la facturacion en el mismo proveedor que ya usamos para
+# Suno (ver app/suno_client.py). Documentan que el request/response de este
+# endpoint es identico al de la Messages API real de Anthropic - por eso
+# send_chat() de aca abajo no cambia nada mas que la URL y el header de auth.
+# Verificado con una llamada real (ver /admin/test-acedatacloud) antes de
+# apuntar aca el trafico real de clientes.
+ACEDATACLOUD_MESSAGES_API = "https://api.acedata.cloud/v1/messages"
 
 
 async def send_chat(messages: list, system: str, tools: list) -> dict:
@@ -22,6 +32,14 @@ async def send_chat(messages: list, system: str, tools: list) -> dict:
     (lista de {"role": "user"|"assistant", "content": ...}). Devuelve la
     respuesta cruda de la API (incluye response["content"], una lista de
     bloques que pueden ser de tipo "text" y/o "tool_use").
+
+    NOTA (2026-09-05): esta funcion corre TODO el trafico real de clientes
+    (web EN/ES + Telegram) - por eso, aunque ya se agrego mas abajo el
+    cliente de AceDataCloud (test_acedatacloud_connection), esta funcion
+    sigue apuntando a Anthropic directo hasta confirmar con una llamada real
+    (via /admin/test-acedatacloud) que el formato de respuesta de
+    AceDataCloud es realmente compatible - recien despues de esa
+    verificacion se cambia esta funcion, en un commit aparte.
     """
     async with httpx.AsyncClient(timeout=90) as client:
         resp = await client.post(
@@ -41,6 +59,30 @@ async def send_chat(messages: list, system: str, tools: list) -> dict:
         )
         resp.raise_for_status()
         return resp.json()
+
+
+async def test_acedatacloud_connection() -> dict:
+    """Llamada minima y aislada a AceDataCloud, para verificar EMPIRICAMENTE
+    (no solo por su documentacion) que el formato de respuesta es compatible
+    con lo que espera el resto del codigo (response["content"], bloques con
+    "type": "text"/"tool_use") antes de apuntar send_chat() (usado por TODO
+    el trafico real de clientes, web y Telegram) hacia este proveedor. Solo
+    la usa /admin/test-acedatacloud - no se llama desde ningun flujo real."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            ACEDATACLOUD_MESSAGES_API,
+            headers={
+                "Authorization": f"Bearer {ACEDATACLOUD_API_TOKEN}",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-sonnet-5",
+                "max_tokens": 50,
+                "system": "Respond with exactly one word: PONG",
+                "messages": [{"role": "user", "content": "ping"}],
+            },
+        )
+        return {"status_code": resp.status_code, "body": resp.text}
 
 
 # ---------------------------------------------------------------------------
