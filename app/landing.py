@@ -960,8 +960,9 @@ ___GOOGLE_ADS_SCRIPT___
   .punto:nth-child(3) { animation-delay: 0.4s; }
   @keyframes punto { 0%, 60%, 100% { opacity: 0.3; transform: scale(0.85); } 30% { opacity: 1; transform: scale(1); } }
 
-  #pago-box, #estado-box, #descarga-box { display: none; text-align: center; }
+  #preview-box, #pago-box, #estado-box, #descarga-box { display: none; text-align: center; }
   #pago-box a, #descarga-box a { display: inline-block; margin-top: 12px; padding: 15px 28px; background: var(--rec); color: #fff5ee; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; }
+  #preview-player-container audio { width: 100%; margin: 4px 0 16px; }
   .descarga-aviso { background: #fff3e8; border: 1px solid #f2c9a0; border-radius: 10px; padding: 10px 14px; font-size: 14px; color: #7a4a1e; margin: 0 0 14px; }
   .descarga-item { text-align: left; border: 1px solid #eee0d4; border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
   .descarga-item-titulo { margin: 0 0 8px; font-weight: 700; }
@@ -1123,8 +1124,16 @@ ___GOOGLE_ADS_SCRIPT___
       </div>
     </div>
 
+    <div class="player" id="preview-box">
+      <p style="margin-top:0;"><span class="spinner"></span>Recording a free preview of your real song — this takes a couple minutes...</p>
+      <p style="font-size:12px; color:var(--paper-ink-soft); margin-bottom:0;">
+        No need to reload or do anything - it'll appear right here.
+      </p>
+    </div>
+
     <div class="player" id="pago-box">
-      <p style="margin-top:0;">✅ Your lyrics are ready! Pay below to start recording - no need to leave this page.</p>
+      <div id="preview-player-container"></div>
+      <p style="margin-top:0;">✅ Like what you hear? Pay below to unlock the full song (both takes) - no need to leave this page.</p>
       <div id="stripe-currency-selector"></div>
       <div id="stripe-payment-element"><span class="spinner"></span>Setting up your payment...</div>
       <button id="btn-pagar" type="button">Pay ___PRECIO_BADGE_DYNAMIC___ &amp; Create My Song</button>
@@ -1139,7 +1148,7 @@ ___GOOGLE_ADS_SCRIPT___
     </div>
 
     <div class="player" id="estado-box">
-      <p style="margin-top:0;"><span class="spinner"></span>Recording your song — this takes a few minutes...</p>
+      <p style="margin-top:0;"><span class="spinner"></span>Recording the full song — this takes a few minutes...</p>
       <p style="font-size:12px; color:var(--paper-ink-soft); margin-bottom:0;">
         We'll also email it to you, so you're covered even if you close this tab.
       </p>
@@ -1426,8 +1435,35 @@ async function retomarSesion() {
   const data = await resp.json();
   if (data.delivered && data.audio_urls && data.audio_urls.length) { mostrarDescarga(data.audio_urls, data.final_title, data.amount_mxn, data.currency); return true; }
   if (data.step === "generando" || data.paid) { $("estado-box").style.display = "block"; iniciarPolling(); return true; }
-  if (data.step === "esperando_pago" && data.stripe_client_secret) { montarStripe(data.stripe_client_secret, data.email); $("pago-box").style.display = "block"; iniciarPolling(); return true; }
+  if (data.step === "esperando_pago" && data.stripe_client_secret) { mostrarPreviewYPago(data.preview_url, data.stripe_client_secret, data.email); iniciarPolling(); return true; }
+  if (data.step === "generando_preview") { $("preview-box").style.display = "block"; iniciarPolling(); return true; }
   return false;
+}
+
+// sep 2026: preview gratis antes de pagar - el reproductor del preview y el
+// formulario de pago siempre aparecen JUNTOS (el preview es lo que
+// convence de pagar, no tiene sentido mostrar uno sin el otro). Se llama
+// tanto desde retomarSesion() (el cliente recarga/vuelve) como desde
+// iniciarPolling() (el cliente se queda esperando en la misma pantalla) -
+// dataset.montado evita agregar el reproductor dos veces si ambos caminos
+// llegan a llamarla.
+function mostrarPreviewYPago(previewUrl, clientSecret, email) {
+  $("preview-box").style.display = "none";
+  $("chat").style.display = "none";
+  const cont = $("preview-player-container");
+  if (cont && previewUrl && !cont.dataset.montado) {
+    cont.dataset.montado = "1";
+    const p = document.createElement("p");
+    p.style.marginTop = "0";
+    p.textContent = "🎧 Here's a free preview of your real song:";
+    const audio = document.createElement("audio");
+    audio.controls = true;
+    audio.src = previewUrl;
+    cont.appendChild(p);
+    cont.appendChild(audio);
+  }
+  montarStripe(clientSecret, email);
+  $("pago-box").style.display = "block";
 }
 
 function mostrarDescarga(audioUrls, titulo, amount, currency) {
@@ -1595,7 +1631,16 @@ async function enviarTurno(texto) {
     setTimeout(() => {
       window.location.href = "/?session_id=" + encodeURIComponent(data.redirect_session_id);
     }, 1800);
+  } else if (data.generando_preview) {
+    // sep 2026: ya arranco la generacion real en Suno - se muestra el
+    // "preparando tu preview" y se deja que iniciarPolling() detecte cuando
+    // este listo (junto con el boton de pago, ver mostrarPreviewYPago()).
+    $("chat").style.display = "none";
+    $("preview-box").style.display = "block";
+    iniciarPolling();
   } else if (data.listo_para_pagar && data.stripe_client_secret) {
+    // Camino viejo (deja de usarse en cuanto el preview este validado) -
+    // se deja como respaldo por si algun pedido en curso quedo a mitad.
     montarStripe(data.stripe_client_secret, data.email);
     $("pago-box").style.display = "block";
     $("chat").style.display = "none";
@@ -1616,7 +1661,18 @@ function iniciarPolling() {
   pollTimer = setInterval(async () => {
     const resp = await fetch("/web/status?session_id=" + encodeURIComponent(sessionId));
     const data = await resp.json();
-    if (data.step === "generando" || data.paid) { $("pago-box").style.display = "none"; $("estado-box").style.display = "block"; }
+    // sep 2026: transicion "generando_preview" -> "esperando_pago" - el
+    // preview ya esta listo, se muestra junto con el boton de pago. Se
+    // chequea que pago-box no este visible todavia para no re-montar Stripe
+    // en cada tick mientras el cliente sigue en esta misma pantalla.
+    if (data.step === "esperando_pago" && data.stripe_client_secret && $("pago-box").style.display !== "block") {
+      mostrarPreviewYPago(data.preview_url, data.stripe_client_secret, data.email);
+    }
+    if (data.step === "generando" || data.paid) {
+      $("preview-box").style.display = "none";
+      $("pago-box").style.display = "none";
+      $("estado-box").style.display = "block";
+    }
     if (data.delivered && data.audio_urls && data.audio_urls.length) { clearInterval(pollTimer); mostrarDescarga(data.audio_urls, data.final_title, data.amount_mxn, data.currency); }
   }, 5000);
 }

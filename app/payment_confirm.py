@@ -65,9 +65,26 @@ async def confirmar_pago_web(session_id: str):
     """Version web de confirmar_pago: a diferencia de Telegram, la letra ya
     quedo definida y aprobada ANTES del pago (ver web_conversation.py), asi
     que aca no hace falta volver a hablar con Claude - se manda derecho a
-    generar la cancion en Suno con lo que ya se guardo."""
+    generar la cancion en Suno con lo que ya se guardo.
+
+    sep 2026 (EN): con el preview gratis antes de pagar, la generacion REAL
+    ya arranco en Suno desde que se aprobo la letra (ver
+    web_conversation._finalizar_letra) - suno_task_id ya viene guardado en
+    ese caso. Generar de nuevo aca duplicaria el gasto Y generaria una
+    cancion DISTINTA a la que el cliente ya escucho en el preview (Suno no
+    es determinista). Si ya hay suno_task_id, no se toca - se deja que
+    poll_web_suno_tasks_loop (main.py) haga lo suyo con el que ya existe,
+    igual que si esto hubiera arrancado aca mismo."""
     order = db.get_web_order(session_id)
     if not order or order["paid"]:
+        return
+
+    if order.get("suno_task_id"):
+        # Ya se genero durante el preview - nada que disparar, solo marcar
+        # pagado y dejar que el poll de siempre (find_unfinished_web_suno_tasks
+        # exige paid=1) se encargue de entregar en cuanto Suno termine (puede
+        # que ya este listo del todo, entrega casi al instante).
+        db.update_web_order(session_id, paid=1, step="generando")
         return
 
     db.update_web_order(session_id, paid=1, step="generando")

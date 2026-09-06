@@ -23,6 +23,7 @@ from app.claude_client import (
 from app.config import BASE_URL, resolve_precio_orden
 from app.dlocal_client import create_payment
 from app.stripe_client import create_checkout_session
+from app.suno_client import generate_custom_song
 
 log = logging.getLogger("cancion-bot")
 
@@ -166,6 +167,42 @@ async def _finalizar_letra(session_id: str, order: dict, precio: dict, tool_inpu
             "finalizar_letra (web) llamado sin nombre para session_id=%s", session_id
         )
 
+    language = order.get("language", "es")
+    if language == "en":
+        # sep 2026: preview gratis ANTES de pagar (solo EN por ahora) - en vez
+        # de mostrar el boton de pago de una, arranca la generacion REAL en
+        # Suno ahora mismo (con la letra recien aprobada) y queda en
+        # "generando_preview". poll_web_preview_loop (main.py) detecta cuando
+        # ya hay al menos una version lista, le recorta un preview con el
+        # servicio de media, y RECIEN AHI crea el link de pago - asi el
+        # cliente escucha la cancion real antes de decidir si paga.
+        try:
+            result = await generate_custom_song(
+                lyric=lyric, title=title, style=style, gender=vocal_gender,
+            )
+            task_id = result.get("task_id") or result.get("id")
+        except Exception:
+            log.exception(
+                "Error arrancando la generacion del preview en Suno para session_id=%s",
+                session_id,
+            )
+            return (
+                "Hubo un problema tecnico preparando la muestra de la cancion. Decile "
+                "al cliente que ya lo estamos revisando y que intente de nuevo en un momento."
+            )
+        db.update_web_order(session_id, step="generando_preview", suno_task_id=task_id)
+        resultado["generando_preview"] = True
+        return (
+            "La letra quedo aprobada y ya arranco la generacion REAL de la cancion "
+            "(no hace falta ningun paso mas de tu parte). En tu mensaje de texto de "
+            "este turno, avisale con calidez al cliente que la letra quedo lista, y "
+            "que en un par de minutos le vas a mostrar aca mismo un preview GRATIS de "
+            "su cancion de verdad ya cantada - recien despues de escucharla puede "
+            "pagar si le gusta, para desbloquear la version completa. No hace falta "
+            "que pregunte nada ni haga nada mas: el preview y el boton de pago van a "
+            "aparecer solos en la pantalla en cuanto esten listos."
+        )
+
     try:
         payment = await crear_link_pago(session_id, order, precio, customer_email=email)
     except Exception:
@@ -222,11 +259,26 @@ async def _buscar_pedido_por_correo(tool_input: dict, order: dict, resultado: di
             "donde va a ver el progreso (tambien le llega por correo cuando este lista)."
         )
 
+    if encontrado.get("step") == "generando_preview":
+        # sep 2026: EN, letra ya aprobada, generacion del preview en Suno
+        # todavia en curso (ver poll_web_preview_loop en main.py) - no hay
+        # nada que regenerar aca, solo redirigirlo de vuelta para que
+        # retomarSesion() (landing.py) detecte este mismo step y siga
+        # esperando/mostrando el preview en cuanto este listo.
+        resultado["redirect_session_id"] = found_session_id
+        return (
+            f"Se encontro el pedido de {nombre} ('{titulo}') con la letra ya "
+            "aprobada - todavia se esta preparando el preview gratis de la cancion "
+            "real. Decile que ya encontraste su pedido y que en un segundo lo vas a "
+            "llevar de vuelta a la pantalla donde va a poder escuchar el preview en "
+            "cuanto este listo."
+        )
+
     if encontrado.get("final_lyric"):
-        # Letra ya aprobada pero sin pago confirmado - el link viejo puede
-        # haber expirado o el pago haber sido rechazado. Se genera uno
-        # fresco antes de mandarlo de vuelta, para no devolverle un link
-        # que ya no sirve.
+        # Letra ya aprobada, preview ya listo (o flujo ES, que no tiene
+        # preview), pero sin pago confirmado - el link viejo puede haber
+        # expirado o el pago haber sido rechazado. Se genera uno fresco antes
+        # de mandarlo de vuelta, para no devolverle un link que ya no sirve.
         precio_encontrado = resolve_precio_orden(
             encontrado.get("country"), encontrado.get("tier", "song"), encontrado.get("price_override")
         )

@@ -37,7 +37,10 @@ from app.config import (
     GOOGLE_ADS_CONVERSION_LABEL,
     TRUSTPILOT_REVIEW_URL,
     STRIPE_WEBHOOK_SECRET,
+    LANDING_FLOW,
+    DEDICATION_MAX_CHARS,
 )
+from app import media_client
 from app.claude_client import test_acedatacloud_connection
 from app.conversation import handle_message
 from app.dlocal_client import verify_signature, get_payment
@@ -149,11 +152,13 @@ async def startup():
     _spawn(poll_web_pending_payments_loop())
     _spawn(poll_review_reminder_loop())
     _spawn(poll_recovery_email_loop())
+    _spawn(poll_web_preview_loop())
     log.info(
         "Loops de background arrancados: poll_suno_tasks_loop, "
         "poll_pending_payments_loop, poll_stuck_generation_loop, "
         "poll_web_suno_tasks_loop, poll_web_pending_payments_loop, "
-        "poll_review_reminder_loop, poll_recovery_email_loop"
+        "poll_review_reminder_loop, poll_recovery_email_loop, "
+        "poll_web_preview_loop"
     )
 
 
@@ -371,6 +376,12 @@ async def web_session(request: Request):
     utm_term = body.get("utm_term")
     gclid = body.get("gclid")
 
+    # LANDING_FLOW ("v1"/"v2", ver config.py) solo aplica al flujo en ingles -
+    # se guarda EN EL PEDIDO (no se relee la variable de entorno mas tarde)
+    # para que un pedido en curso no cambie de comportamiento si Diego
+    # cambia la variable despues de que el cliente ya arranco su sesion.
+    landing_flow = LANDING_FLOW if lang == "en" else None
+
     session_id = uuid.uuid4().hex
     db.create_web_order(
         session_id, source=source, country=country_code, currency=precio["currency"],
@@ -378,13 +389,13 @@ async def web_session(request: Request):
         language=lang, tier=tier,
         utm_source=utm_source, utm_medium=utm_medium, utm_campaign=utm_campaign,
         utm_content=utm_content, utm_term=utm_term, gclid=gclid,
-        price_override=price_override,
+        price_override=price_override, landing_flow=landing_flow,
     )
     log.info(
         "[web] nueva sesion %s (source=%s, country=%s, currency=%s, lang=%s, tier=%s, "
-        "detected_country=%s, price_override=%s)",
+        "detected_country=%s, price_override=%s, landing_flow=%s)",
         session_id, source, country_code, precio["currency"], lang, tier,
-        detected_country, price_override,
+        detected_country, price_override, landing_flow,
     )
     return {"session_id": session_id}
 
@@ -437,6 +448,11 @@ async def web_status(session_id: str):
         "tier": order.get("tier", "song"),
         "video_status": order.get("video_status", "none"),
         "video_url": order.get("video_url"),
+        # sep 2026 (EN): preview gratis del audio real, listo ANTES de pagar
+        # (ver web_conversation._finalizar_letra + poll_web_preview_loop en
+        # este mismo archivo). None mientras step="generando_preview" (o en
+        # cualquier pedido en espanol, que no usa este mecanismo).
+        "preview_url": order.get("preview_url"),
         # ago 2026: monto/moneda real cobrados en ESTE pedido - usado por el
         # pixel de Meta (fbq Purchase) en la landing en ingles para reportar
         # el valor real de la venta (ver mostrarDescarga en landing.py). Se
@@ -1845,3 +1861,85 @@ async def check_and_deliver_web(order: dict):
         )
         if enviado:
             db.update_web_order(order["session_id"], delivered_email=1)
+
+
+async def poll_web_preview_loop():
+    """sep 2026: preview gratis ANTES de pagar (EN) - ver
+    web_conversation._finalizar_letra. Corre en paralelo a
+    poll_web_suno_tasks_loop (que sigue encargandose del post-pago, sin
+    cambios): este loop solo mira pedidos SIN pagar que ya arrancaron la
+    generacion real en Suno, esperando a que este lista al menos la primera
+    version para recortarle un preview y recien ahi mostrar el boton de
+    pago."""
+    while True:
+        try:
+            pendientes = db.find_unfinished_web_previews()
+            log.info(
+                "[poll_web_preview_loop] tick - %d pedido(s) esperando preview - mem=%.1fMB",
+                len(pendientes), _memoria_mb(),
+            )
+            for order in pendientes:
+                await check_and_prepare_preview(order)
+        except Exception:
+            log.exception("Error en el loop de preview (web)")
+        await asyncio.sleep(POLL_INTERVAL_SECONDS)
+
+
+async def check_and_prepare_preview(order: dict):
+    session_id = order["session_id"]
+    try:
+        task = await get_task_status(order["suno_task_id"])
+    except Exception:
+        log.exception("Error consultando estado de Suno (preview) para session_id=%s", session_id)
+        return
+
+    info = extract_ready_items(task)
+
+    if info["fallo_total"]:
+        log.error(
+            "La generacion de Suno (preview) fallo para session_id=%s: %s",
+            session_id, task.get("response"),
+        )
+        # Se resetea a "charlando" (mismo patron que confirmar_pago_web ante
+        # un fallo post-pago) para que el cliente pueda seguir charlando y
+        # eventualmente reintentar - final_lyric ya queda guardado, asi que
+        # no pierde lo que ya habia armado.
+        db.update_web_order(session_id, step="charlando", suno_task_id=None)
+        await send_message(
+            ADMIN_CHAT_ID,
+            f"⚠️ Suno reportó 'failed' preparando el preview de un pedido web "
+            f"(email={order.get('email')}, session_id={session_id}).",
+        )
+        return
+
+    ready_items = info["ready_items"]
+    if not ready_items:
+        return  # todavia ninguna version lista - se sigue esperando
+
+    log.info(
+        "Suno task %s (session_id=%s, preview): %d/%d version(es) lista(s)",
+        order["suno_task_id"], session_id, len(ready_items), info["total_items"],
+    )
+
+    preview_url = None
+    try:
+        preview_url = await media_client.generar_preview(ready_items[0]["audio_url"])
+    except Exception:
+        # Un fallo generando el preview NUNCA debe bloquear la venta - el
+        # cliente simplemente no ve el preview y pasa derecho al boton de
+        # pago, igual que el flujo de antes de hoy.
+        log.exception(
+            "Error generando el preview de audio para session_id=%s - se sigue sin preview",
+            session_id,
+        )
+
+    precio = resolve_precio_orden(order.get("country"), order.get("tier", "song"), order.get("price_override"))
+    try:
+        await crear_link_pago(session_id, order, precio, customer_email=order.get("email"))
+    except Exception:
+        log.exception(
+            "Error creando el link de pago tras el preview para session_id=%s", session_id,
+        )
+        return  # se reintenta solo en el proximo tick, suno_task_id se queda igual
+
+    db.update_web_order(session_id, preview_url=preview_url)

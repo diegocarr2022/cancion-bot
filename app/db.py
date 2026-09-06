@@ -209,6 +209,20 @@ MIGRATIONS = [
     # poll_recovery_email_loop en main.py. Mismo patron que
     # review_email_sent: evita mandarlo mas de una vez por pedido.
     "ALTER TABLE web_orders ADD COLUMN recovery_email_sent INTEGER NOT NULL DEFAULT 0",
+    # sep 2026: video de dedicatoria INCLUIDO en el mismo precio (no es el
+    # upsell pagado de Fase 2 de arriba, ese quedo sin usar detras de
+    # ENABLE_VIDEO_TIER) - ver LANDING_FLOW en config.py y app/media_client.py.
+    # landing_flow se guarda AL CREAR el pedido (no se relee LANDING_FLOW en
+    # cada request) para que un pedido en curso no cambie de comportamiento a
+    # mitad de camino si Diego cambia la variable de entorno despues.
+    "ALTER TABLE web_orders ADD COLUMN landing_flow TEXT",
+    "ALTER TABLE web_orders ADD COLUMN dedication_text TEXT",
+    "ALTER TABLE web_orders ADD COLUMN video_job_id TEXT",
+    # sep 2026: preview gratis ANTES de pagar (EN) - recorte real del audio ya
+    # generado en Suno (no un fragmento regenerado aparte, ver
+    # app/media_client.py). Nuevo step "generando_preview" entre "charlando"
+    # y "esperando_pago" (ver web_conversation._finalizar_letra).
+    "ALTER TABLE web_orders ADD COLUMN preview_url TEXT",
 ]
 
 
@@ -665,6 +679,7 @@ def create_web_order(
     utm_term: str | None = None,
     gclid: str | None = None,
     price_override: str | None = None,
+    landing_flow: str | None = None,
 ):
     now = datetime.utcnow().isoformat()
     with get_conn() as conn:
@@ -674,13 +689,13 @@ def create_web_order(
                 (session_id, email, step, messages, source, country, currency,
                  fbclid, fbp, client_ip, client_user_agent, language, tier,
                  utm_source, utm_medium, utm_campaign, utm_content, utm_term, gclid,
-                 price_override, created_at, updated_at)
-            VALUES (?, ?, 'charlando', '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 price_override, landing_flow, created_at, updated_at)
+            VALUES (?, ?, 'charlando', '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (session_id, email, source, country, currency,
              fbclid, fbp, client_ip, client_user_agent, language, tier,
              utm_source, utm_medium, utm_campaign, utm_content, utm_term, gclid,
-             price_override, now, now),
+             price_override, landing_flow, now, now),
         )
 
 
@@ -721,6 +736,19 @@ def find_unfinished_web_suno_tasks():
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT * FROM web_orders WHERE paid = 1 AND suno_task_id IS NOT NULL AND delivered = 0"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def find_unfinished_web_previews():
+    """Pedidos EN (ver web_conversation._finalizar_letra) que ya aprobaron la
+    letra y arrancaron la generacion real en Suno, pero TODAVIA NO pagaron -
+    estan esperando a que este lista al menos la primera version para
+    recortar el preview gratis y recien ahi mostrar el boton de pago (ver
+    poll_web_preview_loop en main.py)."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM web_orders WHERE step = 'generando_preview' AND suno_task_id IS NOT NULL"
         ).fetchall()
         return [dict(r) for r in rows]
 

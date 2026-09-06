@@ -18,6 +18,24 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 BASE_URL = os.environ.get("BASE_URL", "").rstrip("/")
 DB_PATH = os.environ.get("DB_PATH", "/data/orders.db")
 
+# --- Servicio de media (droplet propio de Diego, no Render - ver
+# tunecraft-media-services/) para el preview de audio y el video de
+# dedicatoria. MEDIA_SERVICE_TOKEN nunca debe llegar al navegador del
+# cliente - todas las llamadas pasan por app/media_client.py, del lado del
+# servidor. ---
+MEDIA_SERVICE_URL = os.environ.get("MEDIA_SERVICE_URL", "https://media.tunecraft.studio")
+MEDIA_SERVICE_TOKEN = os.environ.get("MEDIA_SERVICE_TOKEN", "")
+
+# --- Variante de landing EN (US) - controla si se ofrece el video de
+# dedicatoria despues del pago. "v1" = flujo de hoy (2 versiones de audio,
+# sin video) + preview gratis antes de pagar. "v2" = 1 sola version de audio
+# (no 2 - evita la confusion de "me gusto mas la otra version pero el video
+# es de esta") + oferta de armar un video con fotos, incluido en el mismo
+# precio (no es upsell). Se activa manualmente en Render, no es un split de
+# trafico automatico - Diego decide cual esta viva en cada momento. ---
+LANDING_FLOW = os.environ.get("LANDING_FLOW", "v1").strip().lower()
+DEDICATION_MAX_CHARS = int(os.environ.get("DEDICATION_MAX_CHARS", "220"))
+
 # --- dLocal Go ---
 DLOCAL_API_KEY = os.environ["DLOCAL_API_KEY"]
 DLOCAL_SECRET_KEY = os.environ["DLOCAL_SECRET_KEY"]
