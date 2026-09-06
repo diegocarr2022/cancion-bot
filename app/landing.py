@@ -1788,6 +1788,14 @@ function manejarVideoTrasEntrega(data) {
   if (status === "none") {
     $("video-offer-box").style.display = "block";
   } else if (status === "collecting") {
+    // sep 2026: la dedicatoria de un intento anterior se conserva del lado
+    // del servidor (a diferencia de las fotos, que se limpian cada vez) -
+    // se precarga aca para no hacer al cliente volver a escribirla.
+    if (data.dedication_text && !$("video-dedicatoria").value) {
+      $("video-dedicatoria").value = data.dedication_text;
+      $("video-dedicatoria-contador").textContent = data.dedication_text.length + " / ___DEDICATION_MAX_CHARS___";
+      actualizarBotonCrearVideo();
+    }
     $("video-form-box").style.display = "block";
   } else if (status === "renderizando") {
     $("video-rendering-box").style.display = "block";
@@ -1854,16 +1862,25 @@ $("btn-video-no").addEventListener("click", () => {
 
 $("btn-video-reintentar").addEventListener("click", async () => {
   $("video-failed-box").style.display = "none";
+  // Solo se limpian las FOTOS (el servidor tambien las limpia, ver
+  // /web/video/decision) - la dedicatoria NO se toca aca, se precarga
+  // abajo con la que ya esta guardada, para no hacer al cliente
+  // escribirla de nuevo.
   fotosSeleccionadas = [];
-  $("video-dedicatoria").value = "";
-  $("video-dedicatoria-contador").textContent = "0 / ___DEDICATION_MAX_CHARS___";
   renderFotosPreview();
   try {
     await fetch("/web/video/decision", {
       method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({session_id: sessionId, quiere_video: true}),
     });
+    const resp = await fetch("/web/status?session_id=" + encodeURIComponent(sessionId));
+    const data = await resp.json();
+    if (data.dedication_text) {
+      $("video-dedicatoria").value = data.dedication_text;
+      $("video-dedicatoria-contador").textContent = data.dedication_text.length + " / ___DEDICATION_MAX_CHARS___";
+    }
   } catch (e) { /* el form de todas formas se muestra - si esto fallo, video/start lo va a atrapar */ }
+  actualizarBotonCrearVideo();
   $("video-form-box").style.display = "block";
 });
 

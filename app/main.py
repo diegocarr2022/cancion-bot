@@ -465,6 +465,10 @@ async def web_status(session_id: str):
         "amount_mxn": order.get("amount_mxn"),
         "currency": order.get("currency"),
         "dedication_max_chars": DEDICATION_MAX_CHARS,
+        # se conserva de un intento anterior (nunca se borra al reintentar,
+        # ver /web/video/decision) - permite prellenar el formulario en vez
+        # de hacer al cliente escribirla de nuevo.
+        "dedication_text": order.get("dedication_text"),
     }
 
 
