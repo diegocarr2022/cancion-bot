@@ -62,14 +62,38 @@ async def send_chat(messages: list, system: str, tools: list) -> dict:
 
 
 async def test_acedatacloud_connection() -> dict:
-    """Llamada minima y aislada a AceDataCloud, para verificar EMPIRICAMENTE
-    (no solo por su documentacion) que el formato de respuesta es compatible
-    con lo que espera el resto del codigo (response["content"], bloques con
-    "type": "text"/"tool_use") antes de apuntar send_chat() (usado por TODO
-    el trafico real de clientes, web y Telegram) hacia este proveedor. Solo
-    la usa /admin/test-acedatacloud - no se llama desde ningun flujo real."""
+    """Dos llamadas minimas y aisladas a AceDataCloud, para verificar
+    EMPIRICAMENTE (no solo por su documentacion) que el formato de respuesta
+    es compatible con lo que espera el resto del codigo, antes de apuntar
+    send_chat() (usado por TODO el trafico real de clientes, web y Telegram)
+    hacia este proveedor. Solo la usa /admin/test-acedatacloud - no se llama
+    desde ningun flujo real.
+
+    - "texto": confirma bloques {"type": "text", "text": ...} (ya verificado
+      2026-09-05, responde "PONG").
+    - "tool_use": el caso CRITICO - finalizar_letra (la funcion que dispara
+      cobro/generacion real) depende 100% de que Claude devuelva un bloque
+      {"type": "tool_use", "id": ..., "name": ..., "input": {...}} con esta
+      forma exacta (ver conversation.py/web_conversation.py, que leen
+      block["name"], block.get("input", {}), block["id"] directo, sin
+      fallback). Se fuerza con tool_choice para no depender de que el modelo
+      decida usarla por su cuenta.
+    """
+    herramienta_prueba = {
+        "name": "sumar",
+        "description": "Suma dos numeros enteros.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "a": {"type": "integer"},
+                "b": {"type": "integer"},
+            },
+            "required": ["a", "b"],
+        },
+    }
+
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
+        resp_texto = await client.post(
             ACEDATACLOUD_MESSAGES_API,
             headers={
                 "Authorization": f"Bearer {ACEDATACLOUD_API_TOKEN}",
@@ -82,7 +106,25 @@ async def test_acedatacloud_connection() -> dict:
                 "messages": [{"role": "user", "content": "ping"}],
             },
         )
-        return {"status_code": resp.status_code, "body": resp.text}
+        resp_tool = await client.post(
+            ACEDATACLOUD_MESSAGES_API,
+            headers={
+                "Authorization": f"Bearer {ACEDATACLOUD_API_TOKEN}",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-sonnet-5",
+                "max_tokens": 200,
+                "system": "Usa la herramienta que se te dio para responder.",
+                "messages": [{"role": "user", "content": "cuanto es 4 + 5? usa la herramienta"}],
+                "tools": [herramienta_prueba],
+                "tool_choice": {"type": "tool", "name": "sumar"},
+            },
+        )
+        return {
+            "texto": {"status_code": resp_texto.status_code, "body": resp_texto.text},
+            "tool_use": {"status_code": resp_tool.status_code, "body": resp_tool.text},
+        }
 
 
 # ---------------------------------------------------------------------------
