@@ -121,10 +121,54 @@ async def test_acedatacloud_connection() -> dict:
                 "tool_choice": {"type": "tool", "name": "sumar"},
             },
         )
+
+        # "multiturno": la primera corrida de "texto" (arriba) devolvio un
+        # bloque {"type": "thinking", ...} SIN que se lo pidieramos - y
+        # conversation.py/web_conversation.py reenvian el content COMPLETO
+        # del turno anterior tal cual (messages.append({"role": "assistant",
+        # "content": assistant_content})) para seguir la charla. Si
+        # AceDataCloud no acepta ese eco de vuelta en el siguiente turno de
+        # una conversacion real (que siempre tiene varios turnos), se
+        # rompería a mitad de una charla real con un cliente - se prueba
+        # este escenario exacto antes de confiar en el resultado de arriba.
+        historial_con_thinking = [
+            {"role": "user", "content": "ping"},
+            {"role": "assistant", "content": _parse_content(resp_texto)},
+            {"role": "user", "content": "respondeme con exactamente una palabra: PONG2"},
+        ]
+        resp_multiturno = await client.post(
+            ACEDATACLOUD_MESSAGES_API,
+            headers={
+                "Authorization": f"Bearer {ACEDATACLOUD_API_TOKEN}",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-sonnet-5",
+                "max_tokens": 50,
+                "system": "Respond with exactly one word: PONG2",
+                "messages": historial_con_thinking,
+            },
+        )
         return {
             "texto": {"status_code": resp_texto.status_code, "body": resp_texto.text},
             "tool_use": {"status_code": resp_tool.status_code, "body": resp_tool.text},
+            "multiturno_con_thinking_echo": {
+                "status_code": resp_multiturno.status_code,
+                "body": resp_multiturno.text,
+            },
         }
+
+
+def _parse_content(resp: httpx.Response) -> list:
+    """Extrae response["content"] de una respuesta cruda, para poder
+    reenviarla tal cual como haria conversation.py/web_conversation.py en un
+    turno siguiente - si el body no es JSON valido o no tiene "content", se
+    deja vacio (el status_code/body crudo de la llamada original ya queda
+    reportado por separado en el resultado)."""
+    try:
+        return resp.json().get("content", [])
+    except Exception:
+        return []
 
 
 # ---------------------------------------------------------------------------
