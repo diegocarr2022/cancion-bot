@@ -975,7 +975,7 @@ ___GOOGLE_ADS_SCRIPT___
   @keyframes punto { 0%, 60%, 100% { opacity: 0.3; transform: scale(0.85); } 30% { opacity: 1; transform: scale(1); } }
 
   #preview-box, #pago-box, #estado-box, #descarga-box,
-  #video-offer-box, #video-form-box, #video-uploading-box, #video-rendering-box, #video-ready-box { display: none; text-align: center; }
+  #video-offer-box, #video-form-box, #video-uploading-box, #video-rendering-box, #video-ready-box, #video-failed-box { display: none; text-align: center; }
   #video-offer-box button, #video-form-box button { width: auto; }
   #video-offer-box .btn-secundario { background: transparent; color: var(--paper-ink); border: 1px solid rgba(36,26,16,0.25); }
   #video-form-box { text-align: left; }
@@ -1251,6 +1251,11 @@ ___GOOGLE_ADS_SCRIPT___
       <p style="margin-top:0;">🎬 Your video is ready!</p>
       <video id="video-ready-player" controls style="width:100%; border-radius:10px;"></video>
       <a id="video-ready-download" href="#" download>⬇ Download video</a>
+    </div>
+
+    <div class="player" id="video-failed-box">
+      <p style="margin-top:0;">Something went wrong making your video - no charge was made for it, and your song is safe either way.</p>
+      <button id="btn-video-reintentar" type="button">Try again</button>
     </div>
   </section>
 
@@ -1789,9 +1794,15 @@ function manejarVideoTrasEntrega(data) {
     iniciarPollingVideo();
   } else if (status === "listo" && data.video_url) {
     mostrarVideoListo(data.video_url);
+  } else if (status === "fallido") {
+    // sep 2026: antes esto no mostraba nada - un cliente real (Diego,
+    // probando) se quedaba sin forma de reintentar despues de un fallo real
+    // (una foto HEIC que el servidor no podia leer, ya corregido, pero el
+    // fallo en si puede repetirse por otro motivo). "Try again" solo
+    // reinicia el paso de fotos - la cancion ya entregada nunca se toca.
+    $("video-failed-box").style.display = "block";
   }
-  // "declined" (el cliente ya dijo que no) y "fallido" (raro - se atiende
-  // manual) no muestran ninguna caja nueva.
+  // "declined" (el cliente ya dijo que no) no muestra ninguna caja nueva.
 }
 
 function mostrarVideoListo(videoUrl) {
@@ -1839,6 +1850,21 @@ $("btn-video-no").addEventListener("click", () => {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({session_id: sessionId, quiere_video: false}),
   }).catch(() => {});
+});
+
+$("btn-video-reintentar").addEventListener("click", async () => {
+  $("video-failed-box").style.display = "none";
+  fotosSeleccionadas = [];
+  $("video-dedicatoria").value = "";
+  $("video-dedicatoria-contador").textContent = "0 / ___DEDICATION_MAX_CHARS___";
+  renderFotosPreview();
+  try {
+    await fetch("/web/video/decision", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({session_id: sessionId, quiere_video: true}),
+    });
+  } catch (e) { /* el form de todas formas se muestra - si esto fallo, video/start lo va a atrapar */ }
+  $("video-form-box").style.display = "block";
 });
 
 function actualizarBotonCrearVideo() {
