@@ -1326,7 +1326,8 @@ async def admin_charlas_abandonadas(
     with db.get_conn() as conn:
         filas = conn.execute(
             """
-            SELECT session_id, landing_flow, created_at, updated_at, messages
+            SELECT session_id, landing_flow, created_at, updated_at, messages,
+                   client_ip, client_user_agent, fbclid, source
             FROM web_orders
             WHERE language = 'en' AND step = 'charlando' AND created_at >= ?
             ORDER BY created_at DESC
@@ -1375,6 +1376,10 @@ async def admin_charlas_abandonadas(
             "updated_at": f["updated_at"],
             "n_mensajes": len(resumen),
             "ultimo_mensaje_de": resumen[-1]["role"] if resumen else None,
+            "client_ip": f["client_ip"],
+            "client_user_agent": f["client_user_agent"],
+            "fbclid": f["fbclid"],
+            "source": f["source"],
             "mensajes": resumen,
         })
     return {"desde": desde, "total": len(resultado), "sesiones": resultado}
