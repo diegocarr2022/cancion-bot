@@ -1997,7 +1997,39 @@ document.querySelectorAll("audio").forEach((audio) => {
 // el link del correo de recuperacion de carrito abandonado. Llamar iniciar()
 // de forma sincronica (como antes) correria antes de que window.Stripe
 // exista todavia, y tronaria justo para ese caso.
-document.addEventListener("DOMContentLoaded", iniciar);
+//
+// sep 2026: antes iniciar() arrancaba con SOLO DOMContentLoaded - creaba una
+// sesion (y gastaba una llamada real a Claude para el saludo automatico) por
+// CADA carga de pagina, incluyendo a alguien que rebota en 1-2s sin llegar a
+// ver el chat siquiera. Encontrado revisando datos reales de produccion: 92%
+// de las sesiones con trafico real de Facebook (fbclid presente, no bots) se
+// quedaban en el primer mensaje sin responder nunca - imposible saber cuanto
+// de eso era rebote generico de landing page (nunca vieron el chat) contra
+// gente que si lo vio y decidio no escribir. Ahora la sesion solo arranca
+// cuando el chat realmente entra en la pantalla (IntersectionObserver) o el
+// visitante lo toca - lo que pase primero - para que la proxima medicion
+// aisle abandono real de rebote normal. Un cliente que vuelve con
+// ?session_id= en la URL (ej. del correo de recuperacion) arranca de
+// inmediato sin esperar nada de esto - ya interactuo antes.
+let _sesionArrancada = false;
+let _chatObserver = null;
+function _arrancarSesionUnaVez() {
+  if (_sesionArrancada) return;
+  _sesionArrancada = true;
+  if (_chatObserver) _chatObserver.disconnect();
+  iniciar();
+}
+document.addEventListener("DOMContentLoaded", () => {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("session_id")) { _arrancarSesionUnaVez(); return; }
+  const chatEl = $("chat");
+  _chatObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => { if (entry.isIntersecting) _arrancarSesionUnaVez(); });
+  }, {threshold: 0.5});
+  _chatObserver.observe(chatEl);
+  chatEl.addEventListener("click", _arrancarSesionUnaVez, {once: true});
+  chatEl.addEventListener("touchstart", _arrancarSesionUnaVez, {once: true, passive: true});
+});
 </script>
 </body>
 </html>
