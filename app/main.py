@@ -1312,6 +1312,74 @@ async def admin_funnel_stats(desde: str = "2026-09-01", _: bool = Depends(_verif
     }
 
 
+@app.get("/admin/charlas-abandonadas")
+async def admin_charlas_abandonadas(
+    desde: str = "2026-09-01", limite: int = 15, _: bool = Depends(_verificar_admin),
+):
+    """Diagnostico TEMPORAL (sep 2026): muestra real de transcripciones de
+    sesiones EN que se quedaron en step='charlando' (95%+ de todas las
+    sesiones, ver /admin/funnel-stats) - para encontrar en que parte del
+    chat la gente deja de responder. Solo lectura. Seguro de borrar despues
+    de usarlo, ningun otro codigo depende de el."""
+    import json as _json
+
+    with db.get_conn() as conn:
+        filas = conn.execute(
+            """
+            SELECT session_id, landing_flow, created_at, updated_at, messages
+            FROM web_orders
+            WHERE language = 'en' AND step = 'charlando' AND created_at >= ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (desde, limite),
+        ).fetchall()
+
+    resultado = []
+    for f in filas:
+        try:
+            mensajes = _json.loads(f["messages"] or "[]")
+        except ValueError:
+            mensajes = []
+        # solo texto (role + primeros 300 caracteres) - no hace falta mas
+        # para ver el patron de abandono. content puede venir como string
+        # (mensajes de texto normales) o como lista de bloques al estilo
+        # Anthropic (tool_use/tool_result de finalizar_letra, etc.) - se
+        # extrae solo el texto legible de cada caso.
+        def _texto_de(content):
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                partes = []
+                for bloque in content:
+                    if not isinstance(bloque, dict):
+                        continue
+                    if bloque.get("type") == "text":
+                        partes.append(bloque.get("text", ""))
+                    elif bloque.get("type") == "tool_use":
+                        partes.append(f"[tool_use:{bloque.get('name')} {bloque.get('input')}]")
+                    elif bloque.get("type") == "tool_result":
+                        partes.append(f"[tool_result: {str(bloque.get('content'))[:150]}]")
+                return " ".join(partes)
+            return str(content)
+
+        resumen = [
+            {"role": m.get("role"), "texto": _texto_de(m.get("content", ""))[:300]}
+            for m in mensajes
+            if isinstance(m, dict)
+        ]
+        resultado.append({
+            "session_id": f["session_id"],
+            "landing_flow": f["landing_flow"] or "v1",
+            "created_at": f["created_at"],
+            "updated_at": f["updated_at"],
+            "n_mensajes": len(resumen),
+            "ultimo_mensaje_de": resumen[-1]["role"] if resumen else None,
+            "mensajes": resumen,
+        })
+    return {"desde": desde, "total": len(resultado), "sesiones": resultado}
+
+
 @app.get("/admin/orden/web/{session_id}", response_class=HTMLResponse)
 async def admin_orden_web(session_id: str, response: Response, _: bool = Depends(_verificar_admin)):
     response.headers["X-Robots-Tag"] = "noindex, nofollow"
