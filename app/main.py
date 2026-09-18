@@ -1263,6 +1263,47 @@ async def admin_test_acedatacloud(_: bool = Depends(_verificar_admin)):
     return resultado
 
 
+@app.get("/admin/funnel-stats")
+async def admin_funnel_stats(desde: str = "2026-09-01", _: bool = Depends(_verificar_admin)):
+    """Diagnostico TEMPORAL (sep 2026): comparar conversion real v1 vs v2 en
+    el embudo EN, pedido por Diego tras ver un caso de abandono en v2 incluso
+    con el correo de recuperacion ($20). Ningun otro codigo depende de esto -
+    seguro de borrar despues de usarlo. Solo lectura, no toca ninguna orden."""
+    conn = db.get_conn()
+    try:
+        filas = conn.execute(
+            """
+            SELECT
+                COALESCE(landing_flow, 'v1') AS flow,
+                COUNT(*) AS total,
+                SUM(paid) AS pagados,
+                SUM(delivered) AS entregados,
+                SUM(CASE WHEN step = 'esperando_pago' AND paid = 0 THEN 1 ELSE 0 END) AS esperando_pago_sin_pagar,
+                SUM(CASE WHEN step = 'generando_preview' THEN 1 ELSE 0 END) AS atorados_en_preview
+            FROM web_orders
+            WHERE language = 'en' AND created_at >= ?
+            GROUP BY flow
+            """,
+            (desde,),
+        ).fetchall()
+        video_stats = conn.execute(
+            """
+            SELECT video_status, COUNT(*) AS n
+            FROM web_orders
+            WHERE language = 'en' AND landing_flow = 'v2' AND created_at >= ? AND paid = 1
+            GROUP BY video_status
+            """,
+            (desde,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {
+        "desde": desde,
+        "por_flow": [dict(f) for f in filas],
+        "video_status_en_v2_pagados": [dict(v) for v in video_stats],
+    }
+
+
 @app.get("/admin/orden/web/{session_id}", response_class=HTMLResponse)
 async def admin_orden_web(session_id: str, response: Response, _: bool = Depends(_verificar_admin)):
     response.headers["X-Robots-Tag"] = "noindex, nofollow"
