@@ -1294,10 +1294,21 @@ async def admin_funnel_stats(desde: str = "2026-09-01", _: bool = Depends(_verif
             """,
             (desde,),
         ).fetchall()
+        por_step = conn.execute(
+            """
+            SELECT COALESCE(landing_flow, 'v1') AS flow, step, COUNT(*) AS n
+            FROM web_orders
+            WHERE language = 'en' AND created_at >= ?
+            GROUP BY flow, step
+            ORDER BY flow, n DESC
+            """,
+            (desde,),
+        ).fetchall()
     return {
         "desde": desde,
         "por_flow": [dict(f) for f in filas],
         "video_status_en_v2_pagados": [dict(v) for v in video_stats],
+        "por_step": [dict(s) for s in por_step],
     }
 
 
