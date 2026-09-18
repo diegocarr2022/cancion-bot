@@ -1269,8 +1269,7 @@ async def admin_funnel_stats(desde: str = "2026-09-01", _: bool = Depends(_verif
     el embudo EN, pedido por Diego tras ver un caso de abandono en v2 incluso
     con el correo de recuperacion ($20). Ningun otro codigo depende de esto -
     seguro de borrar despues de usarlo. Solo lectura, no toca ninguna orden."""
-    conn = db.get_conn()
-    try:
+    with db.get_conn() as conn:
         filas = conn.execute(
             """
             SELECT
@@ -1295,8 +1294,6 @@ async def admin_funnel_stats(desde: str = "2026-09-01", _: bool = Depends(_verif
             """,
             (desde,),
         ).fetchall()
-    finally:
-        conn.close()
     return {
         "desde": desde,
         "por_flow": [dict(f) for f in filas],
