@@ -758,23 +758,61 @@ async def web_review_click(request: Request):
     return {"ok": True}
 
 
+LYRICS_PDF_SIZES = ("8x10", "11x14", "A4", "12x12")
+
+
+async def _vinyl_pdf_bytes(order: dict, size: str) -> bytes | None:
+    """PDF vinil de la letra (diseno de VibeCraft) via el servicio de media. Se generan los 4 tamanos de una vez
+    y se guardan las URLs en el pedido (cache por hash de la letra/titulo/destinatario). Cualquier fallo -> None
+    y quien llama cae al PDF sencillo de siempre (nadie se queda sin PDF)."""
+    import hashlib
+    import json as _json
+
+    title = order.get("final_title") or "Your song"
+    recipient = order.get("final_recipient") or ""
+    sender = order.get("customer_name") or ""
+    h = hashlib.sha1(f"{title}|{order['final_lyric']}|{recipient}|{sender}".encode()).hexdigest()
+    files = None
+    try:
+        cached = _json.loads(order.get("vinyl_pdfs") or "null")
+        if cached and cached.get("h") == h and size in cached.get("files", {}):
+            files = cached["files"]
+    except Exception:  # noqa: BLE001
+        files = None
+    try:
+        if files is None:
+            files = await media_client.generar_vinyl_pdfs(
+                title, order["final_lyric"], recipient=recipient, sender=sender, sizes=list(LYRICS_PDF_SIZES),
+            )
+            db.update_web_order(order["session_id"], vinyl_pdfs=_json.dumps({"h": h, "files": files}))
+        return await media_client.descargar_pdf(files[size])
+    except Exception:  # noqa: BLE001
+        log.exception("PDF vinil no disponible para session_id=%s (se usa el PDF sencillo)", order["session_id"])
+        return None
+
+
 @app.get("/web/lyrics-pdf/{session_id}")
-async def web_lyrics_pdf(session_id: str):
-    """Genera al vuelo el PDF de la letra aprobada (ver app/pdf_client.py) -
-    se ofrece junto al link de audio en cuanto la cancion queda entregada."""
+async def web_lyrics_pdf(session_id: str, size: str = "8x10"):
+    """PDF imprimible de la letra aprobada - se ofrece junto al link de audio en cuanto la cancion queda
+    entregada. oct 2026: diseno vinil de VibeCraft (servicio de media), con ?size=8x10|11x14|A4|12x12; si ese
+    servicio falla, el PDF sencillo de app/pdf_client.py."""
     order = db.get_web_order(session_id)
     if not order or not order.get("final_lyric"):
         raise HTTPException(status_code=404, detail="No hay letra todavia para esta sesion")
-    pdf_bytes = build_lyrics_pdf(
-        order.get("final_title") or "Your song",
-        order["final_lyric"],
-    )
+    if size not in LYRICS_PDF_SIZES:
+        size = "8x10"
     slug = re.sub(r"[^a-z0-9]+", "-", (order.get("final_title") or "tunecraft-song").lower()).strip("-") or "tunecraft-song"
+    pdf_bytes = await _vinyl_pdf_bytes(order, size)
+    if pdf_bytes is None:
+        pdf_bytes = build_lyrics_pdf(order.get("final_title") or "Your song", order["final_lyric"])
+        filename = f"{slug}-lyrics.pdf"
+    else:
+        filename = f"{slug}-lyrics-{size}.pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f'inline; filename="{slug}-lyrics.pdf"',
+            "Content-Disposition": f'inline; filename="{filename}"',
             "X-Robots-Tag": "noindex, nofollow",
         },
     )

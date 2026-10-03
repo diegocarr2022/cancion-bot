@@ -159,6 +159,11 @@ MIGRATIONS = [
     # numero de pedido de Etsy con el que se canjeo el credito (ver /etsy en
     # main.py y app/etsy_client.py).
     "ALTER TABLE web_orders ADD COLUMN etsy_order_number TEXT",
+    # oct 2026: PDF de la letra en espiral sobre un vinil (ver /web/lyrics-pdf en main.py y
+    # tunecraft-media-services/service/vinyl.py). final_recipient = para quien es la cancion (la
+    # etiqueta "A SONG FOR X"); vinyl_pdfs = cache JSON {"h": hash_de_la_letra, "files": {tamano: url}}.
+    "ALTER TABLE web_orders ADD COLUMN final_recipient TEXT",
+    "ALTER TABLE web_orders ADD COLUMN vinyl_pdfs TEXT",
     # Columnas del upsell de video (Fase 2) - se agregan ya de una para no
     # tener que migrar dos veces, aunque no se usen hasta que ENABLE_VIDEO_TIER
     # este activo. video_status es independiente de "step": un fallo de video

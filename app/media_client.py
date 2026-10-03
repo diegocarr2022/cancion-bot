@@ -66,3 +66,24 @@ async def estado_video(job_id: str) -> dict:
         resp = await client.get(f"{MEDIA_SERVICE_URL}/video/{job_id}", headers=_HEADERS)
         resp.raise_for_status()
         return resp.json()
+
+
+async def generar_vinyl_pdfs(title: str, lyrics: str, recipient: str = "", sender: str = "",
+                             dedication: str = "", sizes: list[str] | None = None) -> dict[str, str]:
+    """PDF de la letra en espiral sobre un vinil (oct 2026, ver tunecraft-media-services/service/vinyl.py).
+    Devuelve {tamano: url_del_pdf}; levanta excepcion si el servicio no responde (el que llama cae al PDF
+    sencillo de pdf_client.py). Tarda unos segundos (Chromium headless en el droplet)."""
+    body = {"title": title, "lyrics": lyrics, "recipient": recipient, "sender": sender, "dedication": dedication}
+    if sizes:
+        body["sizes"] = sizes
+    async with httpx.AsyncClient(timeout=90) as client:
+        resp = await client.post(f"{MEDIA_SERVICE_URL}/vinyl-pdf", headers=_HEADERS, json=body)
+        resp.raise_for_status()
+        return resp.json()["files"]
+
+
+async def descargar_pdf(url: str) -> bytes:
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        return resp.content

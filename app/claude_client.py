@@ -843,6 +843,12 @@ WEB_CONTENT_TOOLS_EN = [
                                     "NOT enough, Suno only reliably honors gender through this "
                                     "dedicated field.",
                 },
+                "recipient": {
+                    "type": "string",
+                    "description": "OPTIONAL: the first name (or how they call them, e.g. 'Ana' or 'Mom') of the "
+                                    "person the song is for, ONLY if the customer told you. It is printed on the "
+                                    "printable lyrics PDF ('A song for Ana'). Omit it if unknown - never guess.",
+                },
                 "customer_name": {
                     "type": "string",
                     "description": "The name the customer gave you at the start of the "

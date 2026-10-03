@@ -225,6 +225,9 @@ async def _finalizar_letra(session_id: str, order: dict, precio: dict, tool_inpu
         # habia pedido antes en la charla - no pisar un correo valido ya
         # guardado solo porque este turno en particular no lo repitio.
         email = order.get("email") or email
+    recipient = (tool_input.get("recipient") or "").strip()[:60]
+    if recipient:
+        db.update_web_order(session_id, final_recipient=recipient)
     if customer_name:
         db.update_web_order(session_id, customer_name=customer_name)
     else:

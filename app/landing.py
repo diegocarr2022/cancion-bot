@@ -1647,9 +1647,21 @@ function mostrarDescarga(audioUrls, titulo, amount, currency) {
   const pdf = document.createElement("a");
   pdf.href = "/web/lyrics-pdf/" + encodeURIComponent(sessionId);
   pdf.target = "_blank"; pdf.rel = "noopener";
-  pdf.textContent = "Download lyrics (PDF)";
+  pdf.textContent = "Download printable lyrics (PDF)";
   cont.appendChild(pdf);
   cont.appendChild(document.createElement("br"));
+  // oct 2026: PDF vinil en 4 tamanos (ver /web/lyrics-pdf en main.py) - el principal es 8x10
+  const otros = document.createElement("span");
+  otros.style.cssText = "display:block; font-size:12px; margin-top:4px; opacity:0.85;";
+  otros.appendChild(document.createTextNode("Other print sizes: "));
+  [["11x14", "11\u00d714"], ["A4", "A4"], ["12x12", "12\u00d712"]].forEach(([k, l], i) => {
+    const a = document.createElement("a");
+    a.href = "/web/lyrics-pdf/" + encodeURIComponent(sessionId) + "?size=" + k;
+    a.target = "_blank"; a.rel = "noopener"; a.textContent = l;
+    if (i) otros.appendChild(document.createTextNode(" \u00b7 "));
+    otros.appendChild(a);
+  });
+  cont.appendChild(otros);
   $("descarga-box").style.display = "block";
 }
 
