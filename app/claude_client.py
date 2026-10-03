@@ -385,6 +385,16 @@ def build_web_content_system_prompt(precio_texto: str, language: str = "es", lan
 # cambia esos fragmentos en la plantilla, _build_etsy_web_prompt() falla fuerte
 # (ValueError) en vez de mandar a un comprador de Etsy un prompt que hable de pagos.
 _ETSY_PROMPT_REPLACEMENTS = (
+    # El listing de Etsy promete "English only" (el chat, la letra y la cancion): en esta variante se
+    # quita la excepcion de la plantilla EN que deja escribir la letra en espanol si el cliente lo pide.
+    (
+        "  else around them (the actual sentences) has to be in English, always,\n"
+        "  unless the customer explicitly asks you to write the lyrics in Spanish.",
+        "  else around them (the actual sentences) has to be in English, always.\n"
+        "  This service is English-only, with NO exceptions: if the customer asks for lyrics or a\n"
+        "  conversation in Spanish or any other language, kindly explain that this service is English-only\n"
+        "  (as stated in the Etsy listing) and offer to write their song in English instead.",
+    ),
     (
 '0.5. If at ANY point the customer implies they already have an order from a\n   previous session (e.g. "I already paid but can\'t find my song", "I got an\n   error after paying", "where\'s my song", "I lost the page") - this can\n   happen if they closed the tab, their payment failed, or they came back in\n   a new window without the original link - ask for their email if you don\'t\n   have it yet and call the find_previous_order function instead of\n   continuing the normal flow. Recovering their real order is much better\n   than making them start a brand new song without realizing they already\n   paid.\n\n',
 "0.5. If at ANY point the customer says they lost the page or can't find their song, tell them\n   to go back to the page where they entered their Etsy order number and enter it again - their\n   song will be there. Do not ask for their email for this.\n\n",
