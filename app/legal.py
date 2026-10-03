@@ -72,33 +72,52 @@ PRIVACIDAD_HTML = f"""<!DOCTYPE html>
 <body>
 <a class="volver" href="/cancion">&larr; Volver</a>
 <h1>Aviso de Privacidad</h1>
-<p>Última actualización: 2026.</p>
+<p>Última actualización: octubre de 2026.</p>
 
 <h2>1. Datos que recolectamos</h2>
-<p>Para poder crear y entregarte tu canción personalizada, recolectamos: tu correo electrónico (para enviarte
-el archivo final), la información que nos compartes sobre la canción (para quién es, ocasión, estilo, detalles
-y anécdotas), y datos técnicos básicos de tu visita (como la dirección IP y el navegador, con fines de
-seguridad y para medir el origen de las visitas desde anuncios).</p>
+<p>Para poder crear y entregarte tu canción personalizada, recolectamos:</p>
+<ul>
+<li>tu correo electrónico (para enviarte el archivo final) y el nombre que nos compartes;</li>
+<li>la información que nos compartes sobre la canción (para quién es, ocasión, estilo, detalles y anécdotas) y la
+letra que apruebas;</li>
+<li>si usas una función opcional de video, las fotos que subes (solo se usan para hacer tu video y se borran
+automáticamente cuando queda listo);</li>
+<li>datos técnicos y publicitarios de tu visita: dirección IP, navegador y dispositivo, país aproximado, la página o
+anuncio que te trajo (como parámetros de campaña e identificadores de clic) y cookies de nuestras herramientas de
+publicidad y analítica (ver sección 3).</li>
+</ul>
 
 <h2>2. Para qué usamos tus datos</h2>
-<p>Usamos estos datos únicamente para: generar la letra y el estilo de tu canción, procesar el pago, entregarte
-el archivo final por correo y en esta página, y darte soporte si tienes algún problema con tu pedido.</p>
+<p>Los usamos para: generar la letra y el audio de tu canción, procesar el pago, entregarte los archivos finales por
+correo y en esta página, darte soporte y mantener el servicio seguro. Si dejas un pedido sin terminar, o después de
+entregarte tu canción, podemos escribirte por correo una o dos veces (por ejemplo para recordarte el pedido pendiente o
+pedirte tu opinión); puedes pedirnos que dejemos de hacerlo. También usamos datos técnicos para medir qué anuncios
+generan pedidos.</p>
 
-<h2>3. Con quién se comparten</h2>
-<p>Compartimos la información estrictamente necesaria con los proveedores que hacen posible el servicio:
-el proveedor de pagos (dLocal Go, para procesar tu pago), el proveedor de generación musical por IA (para crear
-el audio a partir de la letra y el estilo), y nuestro proveedor de correo (para enviarte el archivo final). No
-vendemos ni compartimos tus datos con terceros para fines publicitarios.</p>
+<h2>3. Publicidad y analítica</h2>
+<p>En nuestro sitio usamos el Pixel de Meta y herramientas de Google (Google Analytics / Google Ads) para medir qué
+publicidad nos trae clientes. Estos proveedores pueden recibir información como las páginas que visitas, eventos de
+compra e identificadores de cookies, y la tratan conforme a sus propios avisos de privacidad.</p>
 
-<h2>4. Cuánto tiempo conservamos tus datos</h2>
-<p>Conservamos la información de tu pedido mientras sea necesario para brindarte soporte relacionado con esa
-compra.</p>
+<h2>4. Con quién se comparten</h2>
+<p>Compartimos solo la información estrictamente necesaria con los proveedores que hacen posible el servicio:
+nuestros proveedores de pago (dLocal Go o Stripe, según tu región), los proveedores de IA que escriben la letra y
+generan el audio, nuestro proveedor de correo, nuestros proveedores de hosting y de procesamiento de archivos, y las
+plataformas de publicidad mencionadas arriba. No vendemos tus datos personales.</p>
 
-<h2>5. Tus derechos (ARCO)</h2>
-<p>Puedes solicitar acceder, rectificar, cancelar u oponerte al uso de tus datos personales (derechos ARCO)
-escribiéndonos por los canales de contacto indicados en el sitio.</p>
+<h2>5. Tratamiento en otros países</h2>
+<p>Nuestros proveedores pueden tratar datos en Estados Unidos y otros países. Elegimos proveedores que los protejan de
+forma adecuada.</p>
 
-<h2>6. Menores de edad</h2>
+<h2>6. Cuánto tiempo conservamos tus datos</h2>
+<p>Conservamos la información de tu pedido mientras sea necesario para brindarte soporte relacionado con esa compra
+y mientras la ley lo exija. Puedes pedirnos que la borremos antes.</p>
+
+<h2>7. Tus derechos (ARCO)</h2>
+<p>Puedes solicitar acceder, rectificar, cancelar u oponerte al uso de tus datos personales (derechos ARCO), o pedirnos
+que dejemos de enviarte correos, escribiéndonos por los canales de contacto indicados en el sitio.</p>
+
+<h2>8. Menores de edad</h2>
 <p>Este servicio no está dirigido a menores de edad. Si eres menor de edad, pide a un adulto responsable que
 realice la compra.</p>
 </body></html>
@@ -153,8 +172,9 @@ infringes on third-party rights. We reserve the right to refuse or cancel (with 
 violates this.</p>
 
 <h2>6. Payments</h2>
-<p>Payments are processed through an external payment provider (PayPal for customers in the United States;
-dLocal Go for other regions). We do not store card data on our servers.</p>
+<p>Payments on this site are processed through an external payment provider (Stripe, or dLocal Go in some
+regions). We do not store card data on our servers. Orders placed through our Etsy shop are paid on Etsy under
+Etsy's terms.</p>
 
 <h2>7. Contact</h2>
 <p>For questions, support, or requests related to your order, reach us through the contact channels listed on
@@ -167,32 +187,55 @@ PRIVACY_HTML_EN = f"""<!DOCTYPE html>
 <body>
 <a class="volver" href="/">&larr; Back</a>
 <h1>{BRAND_NAME_EN} — Privacy Notice</h1>
-<p>Last updated: 2026.</p>
+<p>Last updated: October 2026.</p>
 
 <h2>1. Data we collect</h2>
-<p>To create and deliver your personalized song, we collect: your email address (to send you the final file),
-the information you share with us about the song (who it's for, occasion, style, details and anecdotes), and
-basic technical data about your visit (like IP address and browser, for security purposes and to measure where
-visits from ads come from).</p>
+<p>To create and deliver your personalized song we collect:</p>
+<ul>
+<li>your email address (to send you the final file) and the name you give us;</li>
+<li>what you share with us about the song: who it's for, the occasion, the style, details and anecdotes, and the
+lyrics you approve;</li>
+<li>if you bought through our Etsy shop, your Etsy order number (we use it only to confirm your purchase with Etsy);</li>
+<li>if you use an optional video feature, the photos you upload (they are only used to make your video and are
+deleted automatically once it is ready);</li>
+<li>technical and advertising data about your visit: IP address, browser and device, approximate country, the page
+or ad that brought you to us (such as campaign parameters and click IDs), and cookies set by our advertising and
+analytics tools (see section 3).</li>
+</ul>
 
 <h2>2. What we use your data for</h2>
-<p>We use this data solely to: generate the lyrics and style of your song, process payment, deliver the final
-file by email and on this page, and provide support if you have any issue with your order.</p>
+<p>We use it to: generate the lyrics and the audio of your song, process your payment, deliver the final files by
+email and on this site, give you support, and keep the service secure. If you leave an order unfinished, or after your
+song is delivered, we may email you once or twice about it (for example to remind you of the unfinished order or to
+ask for feedback); you can ask us to stop. We do not send these emails to customers who bought through Etsy. We also
+use technical data to measure which ads lead to orders.</p>
 
-<h2>3. Who we share it with</h2>
-<p>We share the strictly necessary information with the providers that make the service possible: the payment
-provider (PayPal or dLocal Go, depending on your region, to process your payment), the AI music-generation
-provider (to create the audio from the lyrics and style), and our email provider (to send you the final file).
-We do not sell or share your data with third parties for advertising purposes.</p>
+<h2>3. Advertising and analytics</h2>
+<p>On our own website we use the Meta Pixel and Google tools (Google Analytics / Google Ads) to measure which
+advertising brings customers. These providers may receive information such as the pages you view, purchase events and
+cookie identifiers, and handle it under their own privacy policies. We do not use these tools on the page where
+customers of our Etsy shop enter their order number.</p>
 
-<h2>4. How long we keep your data</h2>
-<p>We keep your order information for as long as needed to provide support related to that purchase.</p>
+<h2>4. Who we share it with</h2>
+<p>We share only what is strictly necessary with the providers that make the service possible: our payment providers
+(Stripe, or dLocal Go in some regions), the AI providers that write the lyrics and generate the audio, our email
+provider, our hosting and file-processing providers, Etsy (to verify Etsy orders), and the advertising platforms
+mentioned above. We do not sell your personal data.</p>
 
-<h2>5. Your rights</h2>
-<p>You can request to access, correct, or delete your personal data by contacting us through the contact
-channels listed on the site.</p>
+<h2>5. International processing</h2>
+<p>Our providers may process data in the United States and other countries. We choose providers that protect it
+appropriately.</p>
 
-<h2>6. Minors</h2>
+<h2>6. How long we keep your data</h2>
+<p>We keep your order information for as long as needed to provide support related to that purchase, and for as
+long as the law requires. You can ask us to delete it earlier.</p>
+
+<h2>7. Your rights</h2>
+<p>You can request to access, correct, or delete your personal data, or ask us to stop sending you emails, by
+contacting us through the contact channels listed on the site (or by messaging us on Etsy if you bought there).
+If you are in the European Union or California, you also have the rights granted to you by GDPR and CCPA.</p>
+
+<h2>8. Minors</h2>
 <p>This service is not directed at minors. If you are a minor, please have a responsible adult make the
 purchase.</p>
 </body></html>
