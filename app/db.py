@@ -167,6 +167,9 @@ MIGRATIONS = [
     # como quiere firmar el cliente la letra impresa (primer nombre o apodo; mucha gente da su nombre completo en
     # customer_name pero para una dedicatoria prefiere algo corto) - ver _vinyl_pdf_bytes en main.py.
     "ALTER TABLE web_orders ADD COLUMN final_from TEXT",
+    # oct 2026: "misma letra, otro estilo" (ver /web/variation en main.py): la sesion hija apunta a la sesion de
+    # la que copio la letra aprobada.
+    "ALTER TABLE web_orders ADD COLUMN parent_session_id TEXT",
     # Columnas del upsell de video (Fase 2) - se agregan ya de una para no
     # tener que migrar dos veces, aunque no se usen hasta que ENABLE_VIDEO_TIER
     # este activo. video_status es independiente de "step": un fallo de video

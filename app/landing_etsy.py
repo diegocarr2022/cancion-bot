@@ -90,6 +90,50 @@ _FAQ_COST_REPLACEMENT = (
     "tell us the story, approve the lyrics, and that's it.</p></div>"
 )
 
+_ETSY_VARIATION_JS = """async function ofrecerVariacion() {
+  // pedido de Etsy con creditos restantes: ofrecer la MISMA letra en otro estilo (2 tomas) - ver /web/variation
+  try {
+    if (document.getElementById("variation-box")) return;
+    const r = await fetch("/etsy/credits?session_id=" + encodeURIComponent(sessionId));
+    const d = await r.json();
+    if (!d.eligible || !(d.remaining > 0)) return;
+    const box = document.createElement("div");
+    box.id = "variation-box";
+    box.style.cssText = "margin-top:18px; padding-top:16px; border-top:1px solid var(--line);";
+    const n = d.remaining;
+    const p = document.createElement("p");
+    p.style.cssText = "margin:0 0 10px; font-size:14px;";
+    p.textContent = "Want these same lyrics in another style? Your order still includes " + n + " more song" +
+      (n === 1 ? "" : "s") + ". Use one to get this song again in a new style (two takes), ready in about 2 minutes.";
+    const sel = document.createElement("select");
+    sel.id = "variation-style";
+    sel.style.cssText = "width:100%; padding:12px; border-radius:10px; border:1px solid var(--line); font-size:15px; margin-bottom:10px; background:#fff8e8; color:#241a10;";
+    (d.styles || []).forEach((s) => { const o = document.createElement("option"); o.value = s.key; o.textContent = s.label; sel.appendChild(o); });
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Create another version";
+    btn.style.cssText = "width:100%; padding:14px; font-size:15px; font-weight:700; border:none; border-radius:10px; background:var(--rec); color:#fff5ee; cursor:pointer;";
+    const msg = document.createElement("p");
+    msg.style.cssText = "margin:10px 0 0; font-size:13px; color:#d14b3e; min-height:1.2em;";
+    btn.addEventListener("click", async () => {
+      btn.disabled = true; msg.textContent = "";
+      try {
+        const resp = await fetch("/web/variation", {
+          method: "POST", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({session_id: sessionId, style_key: sel.value}),
+        });
+        const data = await resp.json();
+        if (resp.ok && data.session_id) { window.location.href = "/etsy?session_id=" + encodeURIComponent(data.session_id); return; }
+        msg.textContent = data.detail || "We couldn't start that version. Please try again.";
+      } catch (e) { msg.textContent = "We couldn't reach the server. Please try again."; }
+      btn.disabled = false;
+    });
+    box.appendChild(p); box.appendChild(sel); box.appendChild(btn); box.appendChild(msg);
+    $("descarga-box").appendChild(box);
+  } catch (e) { console.error("ofrecerVariacion:", e); }
+}
+"""
+
 # Reemplaza desde "let _sesionArrancada" hasta el final del <script>: en modo Etsy la sesion NO
 # arranca sola al ver el chat (eso creaba la sesion antes de validar el pedido) sino cuando el
 # numero de pedido ya fue validado. Con ?session_id= (volver a ver su cancion) arranca directo.
@@ -244,8 +288,13 @@ def build_etsy_landing() -> str:
         '    iniciarPolling();\n'
         "  } else if (data.generando_preview) {",
     )
+    html = _sub(
+        html,
+        'cont.appendChild(otros);\n  $("descarga-box").style.display = "block";\n}',
+        'cont.appendChild(otros);\n  $("descarga-box").style.display = "block";\n  ofrecerVariacion();\n}',
+    )
     i = html.index("let _sesionArrancada = false;")
-    html = html[:i] + _ETSY_BOOT_JS
+    html = html[:i] + _ETSY_VARIATION_JS + "\n" + _ETSY_BOOT_JS
 
     # --- marcas de precio dinamico: no deberia quedar ninguna ---
     html = html.replace("___PRECIO_BADGE_DYNAMIC___", "").replace("___PRECIO_BADGE_WAS_DYNAMIC___", "")

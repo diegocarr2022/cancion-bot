@@ -381,6 +381,109 @@ def JSONResponse_safe(content: dict, status_code: int = 200):
     return JSONResponse(content, status_code=status_code, headers={"Cache-Control": "no-store"})
 
 
+# ---------------------------------------------------------------------------
+# oct 2026: "misma letra, otro estilo" para pedidos de Etsy (p. ej. el pack de 3 canciones). En la pantalla de
+# entrega, si al pedido le quedan creditos, el cliente elige un estilo nuevo: se copia la letra YA aprobada a una
+# sesion hija, se gasta un credito (idempotente por sesion hija) y arranca Suno de inmediato con el estilo nuevo -
+# sin chat nuevo ni letra nueva. Entrega las 2 tomas de siempre (poll_web_suno_tasks_loop).
+# ---------------------------------------------------------------------------
+ETSY_STYLE_PRESETS = {
+    "pop": ("Pop", "Upbeat contemporary pop, bright synths, tight drums, catchy hook, warm vocals"),
+    "acoustic": ("Acoustic ballad", "Intimate acoustic ballad, fingerpicked guitar, soft piano, tender vocals, slow tempo"),
+    "country": ("Country", "Warm modern country, acoustic and steel guitar, storytelling vocals, mid-tempo"),
+    "rock": ("Pop / Rock", "Anthemic pop rock, electric guitars, big drums, powerful vocals"),
+    "hiphop": ("Hip-Hop / R&B", "Smooth R&B and hip-hop groove, soft beat, warm bassline, melodic vocals"),
+    "latin": ("Latin", "Latin pop with a reggaeton-flavored rhythm, nylon guitar and percussion, sung in English"),
+    "bigband": ("Big Band", "Classic big band swing, brass section, upright bass, crooner vocals"),
+}
+_variation_recent: dict[tuple, tuple] = {}
+
+
+@app.get("/etsy/credits")
+async def etsy_credits(session_id: str):
+    """Para la pantalla de entrega: ¿se puede ofrecer 'otra version en otro estilo' y cuantos creditos quedan?"""
+    order = db.get_web_order(session_id)
+    if not _etsy_disponible() or not order or order.get("gateway") != "etsy" or not order.get("delivered") \
+            or not order.get("final_lyric"):
+        return JSONResponse_safe({"eligible": False}, 200)
+    res = await etsy_client.check(order.get("etsy_order_number") or "")
+    remaining = (res.get("remaining") or 0) if res.get("ok") else 0
+    return JSONResponse_safe({
+        "eligible": remaining > 0, "remaining": remaining,
+        "styles": [{"key": k, "label": v[0]} for k, v in ETSY_STYLE_PRESETS.items()],
+    }, 200)
+
+
+@app.post("/web/variation")
+async def web_variation(request: Request):
+    import time as _time
+    if not _etsy_disponible():
+        raise HTTPException(status_code=503, detail="No disponible")
+    ip = request.client.host if request.client else "unknown"
+    if _etsy_rate_limited(ip):
+        raise HTTPException(status_code=429, detail="Demasiados intentos")
+    body = await request.json()
+    parent_sid = str(body.get("session_id") or "")
+    style_key = str(body.get("style_key") or "")
+    style_text = re.sub(r"[\x00-\x1f]+", " ", str(body.get("style_text") or "")).strip()[:160]
+    gender = body.get("gender") if body.get("gender") in ("f", "m") else None
+
+    parent = db.get_web_order(parent_sid)
+    if not parent or parent.get("gateway") != "etsy" or not parent.get("delivered") or not parent.get("final_lyric"):
+        raise HTTPException(status_code=403, detail="Esta cancion todavia no esta lista para crear otra version")
+    if style_key in ETSY_STYLE_PRESETS:
+        style = ETSY_STYLE_PRESETS[style_key][1]
+    elif style_text:
+        style = style_text
+    else:
+        raise HTTPException(status_code=400, detail="Elige un estilo")
+    order_number = parent.get("etsy_order_number") or ""
+
+    # doble clic / reintento: la misma peticion en 60 s devuelve la misma sesion hija (no gasta otro credito)
+    dedupe = (parent_sid, style)
+    prev = _variation_recent.get(dedupe)
+    if prev and _time.time() - prev[1] < 60:
+        return {"session_id": prev[0]}
+
+    res = await etsy_client.check(order_number)
+    if not res.get("ok") or (res.get("remaining") or 0) <= 0:
+        raise HTTPException(status_code=409, detail="A este pedido ya no le quedan canciones")
+
+    child = uuid.uuid4().hex
+    db.create_web_order(
+        child, source="etsy-test" if etsy_client.is_test_order(order_number) else "etsy", country="US", currency="USD",
+        client_ip=ip, client_user_agent=request.headers.get("user-agent"), language="en", tier="song",
+        landing_flow=None, gateway="etsy", etsy_order_number=order_number,
+    )
+    db.save_web_final_letra(child, parent.get("final_title") or "", style, parent["final_lyric"],
+                            gender=gender or parent.get("final_gender"))
+    db.update_web_order(
+        child, parent_session_id=parent_sid, email=parent.get("email"), customer_name=parent.get("customer_name"),
+        final_recipient=parent.get("final_recipient"), final_from=parent.get("final_from"),
+    )
+    # Orden a proposito: primero Suno, despues el credito. Si Suno falla, al cliente NO se le gasta el credito y puede
+    # reintentar; si el credito se agota justo ahora (carrera), la sesion hija queda sin pagar y nunca se entrega
+    # (poll_web_suno_tasks_loop solo entrega pedidos pagados) - el costo de esa toma sobrante es de centavos.
+    try:
+        result = await generate_custom_song(
+            lyric=parent["final_lyric"], title=parent.get("final_title") or "", style=style,
+            gender=gender or parent.get("final_gender"),
+        )
+        task_id = result.get("task_id") or result.get("id")
+    except Exception:
+        log.exception("Error arrancando la version alterna en Suno para session_id=%s", child)
+        raise HTTPException(status_code=502, detail="No pudimos arrancar la grabacion. Intenta de nuevo en un momento.")
+    redeemed = await etsy_client.consume(order_number, child)
+    if not redeemed.get("ok"):
+        raise HTTPException(status_code=409, detail="A este pedido ya no le quedan canciones")
+    db.update_web_order(child, paid=1, step="generando", suno_task_id=task_id)
+    _variation_recent[dedupe] = (child, _time.time())
+    if len(_variation_recent) > 500:
+        _variation_recent.clear()
+    log.info("[etsy] version alterna %s (de %s, pedido %s, estilo %r)", child, parent_sid, order_number, style[:60])
+    return {"session_id": child}
+
+
 @app.get("/terminos", response_class=HTMLResponse)
 async def terminos():
     return TERMINOS_HTML
