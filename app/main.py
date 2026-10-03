@@ -770,7 +770,9 @@ async def _vinyl_pdf_bytes(order: dict, size: str) -> bytes | None:
 
     title = order.get("final_title") or "Your song"
     recipient = order.get("final_recipient") or ""
-    sender = order.get("customer_name") or ""
+    # Firma de la letra impresa: lo que el cliente pidio (primer nombre/apodo); si no, el primer nombre de
+    # customer_name (mucha gente da el nombre completo pero en una dedicatoria prefiere algo corto).
+    sender = (order.get("final_from") or "").strip() or ((order.get("customer_name") or "").split() or [""])[0]
     h = hashlib.sha1(f"{title}|{order['final_lyric']}|{recipient}|{sender}".encode()).hexdigest()
     files = None
     try:

@@ -164,6 +164,9 @@ MIGRATIONS = [
     # etiqueta "A SONG FOR X"); vinyl_pdfs = cache JSON {"h": hash_de_la_letra, "files": {tamano: url}}.
     "ALTER TABLE web_orders ADD COLUMN final_recipient TEXT",
     "ALTER TABLE web_orders ADD COLUMN vinyl_pdfs TEXT",
+    # como quiere firmar el cliente la letra impresa (primer nombre o apodo; mucha gente da su nombre completo en
+    # customer_name pero para una dedicatoria prefiere algo corto) - ver _vinyl_pdf_bytes en main.py.
+    "ALTER TABLE web_orders ADD COLUMN final_from TEXT",
     # Columnas del upsell de video (Fase 2) - se agregan ya de una para no
     # tener que migrar dos veces, aunque no se usen hasta que ENABLE_VIDEO_TIER
     # este activo. video_status es independiente de "step": un fallo de video

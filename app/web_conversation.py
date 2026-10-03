@@ -228,6 +228,9 @@ async def _finalizar_letra(session_id: str, order: dict, precio: dict, tool_inpu
     recipient = (tool_input.get("recipient") or "").strip()[:60]
     if recipient:
         db.update_web_order(session_id, final_recipient=recipient)
+    from_name = (tool_input.get("from_name") or "").strip()[:60]
+    if from_name:
+        db.update_web_order(session_id, final_from=from_name)
     if customer_name:
         db.update_web_order(session_id, customer_name=customer_name)
     else:

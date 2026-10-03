@@ -845,9 +845,18 @@ WEB_CONTENT_TOOLS_EN = [
                 },
                 "recipient": {
                     "type": "string",
-                    "description": "OPTIONAL: the first name (or how they call them, e.g. 'Ana' or 'Mom') of the "
-                                    "person the song is for, ONLY if the customer told you. It is printed on the "
-                                    "printable lyrics PDF ('A song for Ana'). Omit it if unknown - never guess.",
+                    "description": "OPTIONAL: the first name or nickname (how the customer calls them, e.g. 'Ana' or "
+                                    "'Mom' - not a full name) of the person the song is for, ONLY if the customer "
+                                    "told you. It is printed on the printable lyrics PDF ('A song for Ana'). Omit it "
+                                    "if unknown - never guess.",
+                },
+                "from_name": {
+                    "type": "string",
+                    "description": "OPTIONAL: how the customer wants to SIGN the printed lyrics (the 'with love, "
+                                    "<name>' line): their first name or nickname (e.g. 'Carlos' or 'Lolo'), NOT a "
+                                    "full name - many people give a full name but prefer something short on a "
+                                    "dedication. Use what they told you; if they only gave a full name, pass just "
+                                    "the first name. Omit it if you don't know.",
                 },
                 "customer_name": {
                     "type": "string",
