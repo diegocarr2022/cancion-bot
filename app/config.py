@@ -413,4 +413,11 @@ MEDIA_DIR = os.environ.get("MEDIA_DIR", "/data/media")
 ETSY_WORKER_URL = os.environ.get("ETSY_WORKER_URL", "").rstrip("/")
 ETSY_REDEEM_KEY = os.environ.get("ETSY_REDEEM_KEY", "")
 ETSY_SONG_PRODUCT = os.environ.get("ETSY_SONG_PRODUCT", "tunecraft-song")
-ETSY_ENABLED = bool(ETSY_WORKER_URL and ETSY_REDEEM_KEY)
+# Numeros de pedido "de prueba" (separados por coma, solo digitos), p. ej. ETSY_TEST_ORDERS=720514.
+# Dejan pasar /etsy sin consultar a Etsy y con creditos ilimitados, para que Diego pruebe el flujo
+# completo en varios escenarios. Viven SOLO en la variable de entorno de Render (no en el repo) y se
+# pueden rotar o borrar en cualquier momento. Cada cancion de prueba gasta Suno/Claude de verdad.
+ETSY_TEST_ORDERS = frozenset(
+    "".join(ch for ch in n if ch.isdigit()) for n in os.environ.get("ETSY_TEST_ORDERS", "").split(",") if n.strip()
+) - {""}
+ETSY_ENABLED = bool((ETSY_WORKER_URL and ETSY_REDEEM_KEY) or ETSY_TEST_ORDERS)

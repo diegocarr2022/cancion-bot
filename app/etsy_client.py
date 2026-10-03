@@ -12,9 +12,17 @@ import logging
 
 import httpx
 
-from app.config import ETSY_WORKER_URL, ETSY_REDEEM_KEY, ETSY_SONG_PRODUCT
+from app.config import ETSY_WORKER_URL, ETSY_REDEEM_KEY, ETSY_SONG_PRODUCT, ETSY_TEST_ORDERS
 
 log = logging.getLogger("cancion-bot")
+
+
+def is_test_order(order_number: str) -> bool:
+    """Pedido de prueba de Diego (ETSY_TEST_ORDERS): pasa sin Etsy y sin limite de creditos."""
+    return order_number in ETSY_TEST_ORDERS
+
+
+_TEST_RESULT = {"ok": True, "credits": 999, "used": 0, "remaining": 999, "test": True}
 
 
 async def _redeem(action: str, order_number: str, session_id: str | None = None) -> dict:
@@ -38,8 +46,13 @@ async def _redeem(action: str, order_number: str, session_id: str | None = None)
 
 
 async def check(order_number: str) -> dict:
+    if is_test_order(order_number):
+        return dict(_TEST_RESULT)
     return await _redeem("check", order_number)
 
 
 async def consume(order_number: str, session_id: str) -> dict:
+    if is_test_order(order_number):
+        log.info("[etsy-test] credito de prueba para session_id=%s (pedido %s)", session_id, order_number)
+        return dict(_TEST_RESULT)
     return await _redeem("consume", order_number, session_id)

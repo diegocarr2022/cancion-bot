@@ -366,7 +366,7 @@ async def etsy_check(request: Request):
     if not res.get("ok"):
         return JSONResponse_safe({"ok": False, "error": _ETSY_ERRORS.get(res.get("error"), _ETSY_ERRORS["unavailable"])}, 200)
     # Ya gasto su credito antes: lo mandamos de vuelta a su cancion en vez de dejarlo sin saber donde quedo.
-    previa = db.find_etsy_session_for_order(numero)
+    previa = None if etsy_client.is_test_order(numero) else db.find_etsy_session_for_order(numero)
     if previa:
         return JSONResponse_safe({"ok": True, "resume_session_id": previa, "remaining": res.get("remaining")}, 200)
     if (res.get("remaining") or 0) <= 0:
@@ -421,7 +421,8 @@ async def web_session(request: Request):
             raise HTTPException(status_code=403, detail="Pedido de Etsy no valido")
         session_id = uuid.uuid4().hex
         db.create_web_order(
-            session_id, source="etsy", country="US", currency="USD",
+            session_id, source="etsy-test" if etsy_client.is_test_order(etsy_order) else "etsy",
+            country="US", currency="USD",
             client_ip=request.client.host if request.client else None,
             client_user_agent=request.headers.get("user-agent"),
             language="en", tier="song", landing_flow=None,
