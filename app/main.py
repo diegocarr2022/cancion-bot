@@ -365,13 +365,15 @@ async def etsy_check(request: Request):
     res = await etsy_client.check(numero)
     if not res.get("ok"):
         return JSONResponse_safe({"ok": False, "error": _ETSY_ERRORS.get(res.get("error"), _ETSY_ERRORS["unavailable"])}, 200)
-    # Ya gasto su credito antes: lo mandamos de vuelta a su cancion en vez de dejarlo sin saber donde quedo.
+    remaining = res.get("remaining") or 0
+    if remaining > 0:
+        # Todavia le quedan creditos (p. ej. pack de 3 canciones): sesion nueva, aunque ya haya usado alguno.
+        return JSONResponse_safe({"ok": True, "remaining": remaining}, 200)
+    # Sin creditos: si ya hizo su(s) cancion(es), lo mandamos de vuelta a la ultima en vez de dejarlo sin saber donde quedo.
     previa = None if etsy_client.is_test_order(numero) else db.find_etsy_session_for_order(numero)
     if previa:
-        return JSONResponse_safe({"ok": True, "resume_session_id": previa, "remaining": res.get("remaining")}, 200)
-    if (res.get("remaining") or 0) <= 0:
-        return JSONResponse_safe({"ok": False, "error": _ETSY_ERRORS["no_credits_left"]}, 200)
-    return JSONResponse_safe({"ok": True, "remaining": res.get("remaining")}, 200)
+        return JSONResponse_safe({"ok": True, "resume_session_id": previa, "remaining": 0}, 200)
+    return JSONResponse_safe({"ok": False, "error": _ETSY_ERRORS["no_credits_left"]}, 200)
 
 
 def JSONResponse_safe(content: dict, status_code: int = 200):
