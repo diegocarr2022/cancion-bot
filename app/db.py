@@ -155,6 +155,10 @@ MIGRATIONS = [
     "ALTER TABLE web_orders ADD COLUMN language TEXT NOT NULL DEFAULT 'es'",
     "ALTER TABLE web_orders ADD COLUMN tier TEXT NOT NULL DEFAULT 'song'",
     "ALTER TABLE web_orders ADD COLUMN gateway TEXT",
+    # oct 2026: pedidos que llegan desde Etsy (gateway="etsy") guardan aca el
+    # numero de pedido de Etsy con el que se canjeo el credito (ver /etsy en
+    # main.py y app/etsy_client.py).
+    "ALTER TABLE web_orders ADD COLUMN etsy_order_number TEXT",
     # Columnas del upsell de video (Fase 2) - se agregan ya de una para no
     # tener que migrar dos veces, aunque no se usen hasta que ENABLE_VIDEO_TIER
     # este activo. video_status es independiente de "step": un fallo de video
@@ -632,6 +636,7 @@ def find_web_orders_pending_recovery_email(min_hours: int = 2):
               AND final_lyric IS NOT NULL
               AND email IS NOT NULL
               AND recovery_email_sent = 0
+              AND COALESCE(gateway, '') != 'etsy'
               AND datetime(updated_at) <= datetime('now', ?)
             """,
             (f"-{min_hours} hours",),
@@ -653,11 +658,25 @@ def find_web_orders_pending_review_reminder(min_hours_since_delivery: int = 48):
               AND review_link_clicked = 0
               AND review_email_sent = 0
               AND email IS NOT NULL
+              AND COALESCE(gateway, '') != 'etsy'
               AND datetime(updated_at) <= datetime('now', ?)
             """,
             (f"-{min_hours_since_delivery} hours",),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def find_etsy_session_for_order(etsy_order_number: str):
+    """Sesion mas reciente de un pedido de Etsy que ya gasto su credito (paid=1) -
+    para que quien vuelve a /etsy con el mismo numero de pedido recupere su
+    cancion en vez de quedarse sin saber donde quedo."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT session_id FROM web_orders WHERE etsy_order_number = ? AND paid = 1 "
+            "ORDER BY created_at DESC LIMIT 1",
+            (etsy_order_number,),
+        ).fetchone()
+        return row["session_id"] if row else None
 
 
 def create_web_order(
@@ -680,6 +699,8 @@ def create_web_order(
     gclid: str | None = None,
     price_override: str | None = None,
     landing_flow: str | None = None,
+    gateway: str | None = None,
+    etsy_order_number: str | None = None,
 ):
     now = datetime.utcnow().isoformat()
     with get_conn() as conn:
@@ -689,13 +710,13 @@ def create_web_order(
                 (session_id, email, step, messages, source, country, currency,
                  fbclid, fbp, client_ip, client_user_agent, language, tier,
                  utm_source, utm_medium, utm_campaign, utm_content, utm_term, gclid,
-                 price_override, landing_flow, created_at, updated_at)
-            VALUES (?, ?, 'charlando', '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 price_override, landing_flow, gateway, etsy_order_number, created_at, updated_at)
+            VALUES (?, ?, 'charlando', '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (session_id, email, source, country, currency,
              fbclid, fbp, client_ip, client_user_agent, language, tier,
              utm_source, utm_medium, utm_campaign, utm_content, utm_term, gclid,
-             price_override, landing_flow, now, now),
+             price_override, landing_flow, gateway, etsy_order_number, now, now),
         )
 
 

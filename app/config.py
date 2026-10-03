@@ -402,3 +402,15 @@ BRAND_NAME_EN = "Tunecraft"
 # cancion, via PayPal) ya este vendiendo. Ver app/video_client.py.
 ENABLE_VIDEO_TIER = os.environ.get("ENABLE_VIDEO_TIER", "false").lower() == "true"
 MEDIA_DIR = os.environ.get("MEDIA_DIR", "/data/media")
+
+# --- Canciones vendidas en Etsy (oct 2026) ---
+# El comprador de Etsy entra por /etsy con su numero de pedido; el Worker de
+# Cloudflare de la tienda de Etsy (photo-stocker-etsy-delivery) valida ese
+# pedido contra Etsy y lleva la cuenta de creditos (1 por unidad comprada).
+# Estas variables NO se guardan en el repo: se ponen en Render. Sin ellas
+# (o sin ETSY_REDEEM_KEY) la ruta /etsy queda deshabilitada y el resto del
+# sitio no cambia en nada.
+ETSY_WORKER_URL = os.environ.get("ETSY_WORKER_URL", "").rstrip("/")
+ETSY_REDEEM_KEY = os.environ.get("ETSY_REDEEM_KEY", "")
+ETSY_SONG_PRODUCT = os.environ.get("ETSY_SONG_PRODUCT", "tunecraft-song")
+ETSY_ENABLED = bool(ETSY_WORKER_URL and ETSY_REDEEM_KEY)

@@ -359,7 +359,7 @@ _FLOW_NOTE_V2_EN = (
 )
 
 
-def build_web_content_system_prompt(precio_texto: str, language: str = "es", landing_flow: str = "v1") -> str:
+def build_web_content_system_prompt(precio_texto: str, language: str = "es", landing_flow: str = "v1", etsy: bool = False) -> str:
     """El precio varia segun el pais del cliente (ver PAISES_SOPORTADOS en
     config.py) - por eso el prompt web es una funcion, no un string fijo, asi
     Claude siempre sabe el precio correcto de ESTE pedido en particular si el
@@ -370,9 +370,78 @@ def build_web_content_system_prompt(precio_texto: str, language: str = "es", lan
     mencionando las 2 versiones de audio (sin video); "v2" menciona el video
     de fotos incluido en vez de las 2 versiones (esa variante solo entrega
     UNA version de audio - ver check_and_deliver_web en main.py)."""
+    if etsy:
+        return _build_etsy_web_prompt()
     template = _WEB_CONTENT_SYSTEM_PROMPT_TEMPLATE_EN if language == "en" else _WEB_CONTENT_SYSTEM_PROMPT_TEMPLATE
     flow_note = _FLOW_NOTE_V2_EN if landing_flow == "v2" else _FLOW_NOTE_V1_EN
     return template.format(precio_texto=precio_texto, flow_note=flow_note)
+
+
+# --- Variante para pedidos que llegan desde Etsy (oct 2026, ver /etsy en main.py) ---
+# El comprador ya pago en Etsy y su numero de pedido ya fue validado: en esta
+# charla NO hay precio, pago, checkout ni preview gratis - al aprobar la letra
+# arranca directo la generacion. Se arma a partir de la MISMA plantilla EN (no es
+# una copia) reemplazando solo los fragmentos que hablan de cobro; si alguien
+# cambia esos fragmentos en la plantilla, _build_etsy_web_prompt() falla fuerte
+# (ValueError) en vez de mandar a un comprador de Etsy un prompt que hable de pagos.
+_ETSY_PROMPT_REPLACEMENTS = (
+    (
+'0.5. If at ANY point the customer implies they already have an order from a\n   previous session (e.g. "I already paid but can\'t find my song", "I got an\n   error after paying", "where\'s my song", "I lost the page") - this can\n   happen if they closed the tab, their payment failed, or they came back in\n   a new window without the original link - ask for their email if you don\'t\n   have it yet and call the find_previous_order function instead of\n   continuing the normal flow. Recovering their real order is much better\n   than making them start a brand new song without realizing they already\n   paid.\n\n',
+"0.5. If at ANY point the customer says they lost the page or can't find their song, tell them\n   to go back to the page where they entered their Etsy order number and enter it again - their\n   song will be there. Do not ask for their email for this.\n\n",
+    ),
+    (
+"this page, say they want to recover a previous order, and give their\n   email - that's enough to find it again, no need to start over or lose\n   their progress.",
+"this page and enter their Etsy order number again - that's enough to find it, no need\n   to start over or lose their progress.",
+    ),
+    (
+        "The price of the song for this customer is {precio_texto} - if they ask how\n"
+        "much it costs, answer with this exact figure. The customer has NOT PAID YET\n"
+        "- that happens AFTER they approve the lyrics, not before. They also haven't\n"
+        "given you their name or email yet",
+        "This customer already bought their song on Etsy and their order number was\n"
+        "verified, so there is NOTHING to pay on this page: never mention prices,\n"
+        "payment, checkout or a preview - if they ask about cost, tell them the song is\n"
+        "already included in their Etsy purchase. They haven't\n"
+        "given you their name or email yet",
+    ),
+    (
+        "approve these\n   lyrics and pay.",
+        "approve these\n   lyrics.",
+    ),
+    (
+        "real song is already being recorded, and that in a couple of minutes\n"
+        "   they'll be able to listen to a FREE PREVIEW of their actual song, right\n"
+        "   here in the chat - only once they've heard it and love it do they pay to\n"
+        "   unlock the full thing (not before). Don't say the payment form is showing\n"
+        "   already - it only appears together with the preview, a little later, on\n"
+        "   its own, nothing else for them to do meanwhile.",
+        "real song is already being recorded, and that in a few minutes it will\n"
+        "   appear right here on this page, ready to listen to and download - nothing\n"
+        "   else for them to do meanwhile.",
+    ),
+)
+_ETSY_FLOW_NOTE_EN = (
+    "we always record 2 different takes of the full song, so they'll get both to "
+    "enjoy/keep, not just one to choose from - a real customer got confused thinking "
+    "they had to pick only one"
+)
+
+
+def _build_etsy_web_prompt() -> str:
+    template = _WEB_CONTENT_SYSTEM_PROMPT_TEMPLATE_EN
+    for old, new in _ETSY_PROMPT_REPLACEMENTS:
+        if old not in template:
+            raise ValueError("La plantilla del prompt EN cambio: actualizar _ETSY_PROMPT_REPLACEMENTS en claude_client.py")
+        template = template.replace(old, new, 1)
+    return template.format(precio_texto="", flow_note=_ETSY_FLOW_NOTE_EN)
+
+
+def etsy_prompt_ok() -> bool:
+    try:
+        _build_etsy_web_prompt()
+        return True
+    except Exception:
+        return False
 
 
 _WEB_CONTENT_SYSTEM_PROMPT_TEMPLATE = """Eres un asistente calido y conversacional que ayuda a crear canciones
@@ -801,3 +870,9 @@ WEB_CONTENT_TOOLS_EN = [
         },
     },
 ]
+
+
+# Sin find_previous_order: esa herramienta puede regenerar un link de pago de Stripe para un
+# pedido viejo sin pagar - en Etsy no existe ese camino. Quien pierde la pagina vuelve a
+# /etsy y mete su numero de pedido (ver /etsy/check en main.py).
+WEB_CONTENT_TOOLS_ETSY = [t for t in WEB_CONTENT_TOOLS_EN if t["name"] == "finalizar_letra"]

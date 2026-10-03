@@ -39,6 +39,7 @@ from app.config import (
     STRIPE_WEBHOOK_SECRET,
     LANDING_FLOW,
     DEDICATION_MAX_CHARS,
+    ETSY_ENABLED,
 )
 from app import media_client
 from app.claude_client import test_acedatacloud_connection
@@ -61,6 +62,9 @@ from app.landing import (
     render_share_page,
 )
 from app.legal import TERMINOS_HTML, PRIVACIDAD_HTML, TERMS_HTML_EN, PRIVACY_HTML_EN
+from app import etsy_client
+from app.landing_etsy import ETSY_LANDING_HTML, ETSY_LANDING_ERROR
+from app.claude_client import etsy_prompt_ok
 from app.payment_confirm import confirmar_pago, confirmar_pago_web
 from app.pdf_client import build_lyrics_pdf
 from app.paypal_client import (
@@ -140,6 +144,12 @@ def _spawn(coro) -> asyncio.Task:
 @app.on_event("startup")
 async def startup():
     global BOT_USERNAME
+    if not ETSY_ENABLED:
+        log.info("[etsy] /etsy deshabilitado: faltan ETSY_WORKER_URL / ETSY_REDEEM_KEY")
+    elif not _etsy_disponible():
+        log.error("[etsy] /etsy NO disponible: landing=%s prompt_ok=%s", ETSY_LANDING_ERROR, etsy_prompt_ok())
+    else:
+        log.info("[etsy] /etsy habilitado")
     db.init_db()
     if BASE_URL:
         result = await set_webhook(BASE_URL, TELEGRAM_WEBHOOK_SECRET)
@@ -288,6 +298,87 @@ async def cancion_landing(request: Request, lang: str | None = None):
 
 # Requeridas por las politicas de anuncios de Facebook/Google (cualquier
 # landing que pida datos o cobre dinero tiene que enlazar estas paginas).
+# ---------------------------------------------------------------------------
+# oct 2026: canciones vendidas en Etsy. El PDF que recibe el comprador de Etsy
+# lleva a /etsy: pide el numero de pedido, lo valida el Worker de Cloudflare de
+# la tienda (app/etsy_client.py) y desbloquea el mismo chat de siempre, pero SIN
+# cobro ni preview (ver landing_etsy.py y web_conversation._finalizar_letra_etsy).
+# Todo queda apagado (503) si faltan las variables ETSY_* en Render, si la
+# plantilla EN cambio de forma que /etsy dejaria ver dinero, o si el prompt de
+# Etsy ya no encaja con la plantilla del chat.
+# ---------------------------------------------------------------------------
+def _etsy_disponible() -> bool:
+    return bool(ETSY_ENABLED and ETSY_LANDING_HTML and etsy_prompt_ok())
+
+
+_etsy_check_hits: dict[str, list[float]] = {}
+ETSY_CHECK_MAX_PER_10MIN = 12
+
+
+def _etsy_rate_limited(ip: str) -> bool:
+    import time as _time
+    now = _time.time()
+    hits = [t for t in _etsy_check_hits.get(ip, []) if now - t < 600]
+    if len(hits) >= ETSY_CHECK_MAX_PER_10MIN:
+        _etsy_check_hits[ip] = hits
+        return True
+    hits.append(now)
+    _etsy_check_hits[ip] = hits
+    if len(_etsy_check_hits) > 5000:
+        _etsy_check_hits.clear()
+    return False
+
+
+_ETSY_ERRORS = {
+    "not_found": "We couldn't find that order. Check the number in your Etsy purchase confirmation and try again.",
+    "not_paid": "That order isn't marked as paid yet. If you just bought it, give it a minute and try again.",
+    "wrong_product": "That order doesn't include a personalized song. Make sure you're using the order number from your song purchase.",
+    "no_credits_left": "This order's song has already been used. If you need another one, you can buy another from our Etsy shop.",
+    "unknown_product": "This page isn't available right now. Please contact us through Etsy.",
+    "unavailable": "We couldn't verify your order right now. Please try again in a moment.",
+    "etsy_error": "We couldn't verify your order right now. Please try again in a moment.",
+}
+
+
+@app.get("/etsy", response_class=HTMLResponse)
+async def etsy_landing(response: Response):
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    if not _etsy_disponible():
+        return HTMLResponse("This page is not available right now.", status_code=503)
+    return ETSY_LANDING_HTML
+
+
+@app.post("/etsy/check")
+async def etsy_check(request: Request):
+    if not _etsy_disponible():
+        return JSONResponse_safe({"ok": False, "error": _ETSY_ERRORS["unavailable"]}, 503)
+    ip = request.client.host if request.client else "unknown"
+    if _etsy_rate_limited(ip):
+        return JSONResponse_safe({"ok": False, "error": "Too many attempts. Please wait a few minutes and try again."}, 429)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse_safe({"ok": False, "error": _ETSY_ERRORS["unavailable"]}, 400)
+    numero = re.sub(r"\D", "", str(body.get("order_number") or ""))
+    if not numero or len(numero) > 20:
+        return JSONResponse_safe({"ok": False, "error": _ETSY_ERRORS["not_found"]}, 400)
+    res = await etsy_client.check(numero)
+    if not res.get("ok"):
+        return JSONResponse_safe({"ok": False, "error": _ETSY_ERRORS.get(res.get("error"), _ETSY_ERRORS["unavailable"])}, 200)
+    # Ya gasto su credito antes: lo mandamos de vuelta a su cancion en vez de dejarlo sin saber donde quedo.
+    previa = db.find_etsy_session_for_order(numero)
+    if previa:
+        return JSONResponse_safe({"ok": True, "resume_session_id": previa, "remaining": res.get("remaining")}, 200)
+    if (res.get("remaining") or 0) <= 0:
+        return JSONResponse_safe({"ok": False, "error": _ETSY_ERRORS["no_credits_left"]}, 200)
+    return JSONResponse_safe({"ok": True, "remaining": res.get("remaining")}, 200)
+
+
+def JSONResponse_safe(content: dict, status_code: int = 200):
+    from fastapi.responses import JSONResponse
+    return JSONResponse(content, status_code=status_code, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/terminos", response_class=HTMLResponse)
 async def terminos():
     return TERMINOS_HTML
@@ -318,6 +409,26 @@ async def web_session(request: Request):
     # (ver web_conversation.py). Aca solo se crea la sesion.
     body = await request.json() if await request.body() else {}
     source = body.get("source")
+
+    # oct 2026: sesion de un comprador de Etsy (ver /etsy arriba) - el numero de pedido se
+    # valida SERVER-SIDE contra el Worker antes de crear nada; el frontend solo lo reenvia.
+    etsy_order = re.sub(r"\D", "", str(body.get("etsy_order") or ""))
+    if etsy_order:
+        if not _etsy_disponible():
+            raise HTTPException(status_code=503, detail="No disponible")
+        res = await etsy_client.check(etsy_order)
+        if not res.get("ok") or (res.get("remaining") or 0) <= 0:
+            raise HTTPException(status_code=403, detail="Pedido de Etsy no valido")
+        session_id = uuid.uuid4().hex
+        db.create_web_order(
+            session_id, source="etsy", country="US", currency="USD",
+            client_ip=request.client.host if request.client else None,
+            client_user_agent=request.headers.get("user-agent"),
+            language="en", tier="song", landing_flow=None,
+            gateway="etsy", etsy_order_number=etsy_order,
+        )
+        log.info("[web] nueva sesion de Etsy %s (pedido %s)", session_id, etsy_order)
+        return {"session_id": session_id}
 
     # ?lang=en/es en el link del anuncio (ver /cancion arriba y iniciar() en
     # landing.py) - default espanol si no viene o viene algo invalido.

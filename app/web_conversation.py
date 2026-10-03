@@ -19,9 +19,11 @@ from app.claude_client import (
     build_web_content_system_prompt,
     WEB_CONTENT_TOOLS,
     WEB_CONTENT_TOOLS_EN,
+    WEB_CONTENT_TOOLS_ETSY,
 )
 from app.config import BASE_URL, resolve_precio_orden
 from app.dlocal_client import create_payment
+from app import etsy_client
 from app.stripe_client import create_checkout_session
 from app.suno_client import generate_custom_song
 
@@ -127,6 +129,56 @@ async def crear_link_pago(session_id: str, order: dict, precio: dict, customer_e
     return payment
 
 
+async def _finalizar_letra_etsy(
+    session_id: str, order: dict, title: str, style: str, lyric: str, vocal_gender: str | None, resultado: dict,
+) -> str:
+    """Pedido que llego desde Etsy (oct 2026): el cliente ya pago en Etsy, asi que
+    en el punto donde normalmente se cobra (aprobar la letra) NO hay pago ni preview
+    gratis - se gasta un credito de su numero de pedido (ver app/etsy_client.py) y
+    arranca directo la generacion real en Suno, igual que tras un pago confirmado.
+
+    Orden a proposito: primero el credito, despues Suno. consume() es idempotente por
+    sesion, asi que si Suno falla y el cliente reintenta en la misma sesion no se le
+    gasta un segundo credito."""
+    etsy_order = order.get("etsy_order_number") or ""
+    redeemed = await etsy_client.consume(etsy_order, session_id)
+    if not redeemed.get("ok"):
+        err = redeemed.get("error")
+        log.warning("Canje de Etsy rechazado para session_id=%s (pedido %s): %s", session_id, etsy_order, err)
+        if err == "no_credits_left":
+            return (
+                "No se pudo empezar: el credito de este pedido de Etsy ya se uso para otra cancion. "
+                "Decile al cliente, con calidez, que este pedido ya incluia una cancion y esa ya se creo; "
+                "que si necesita otra puede comprar otra unidad en la tienda de Etsy, o escribirnos por "
+                "Etsy si cree que es un error."
+            )
+        return (
+            "Hubo un problema tecnico verificando el pedido de Etsy. Decile al cliente que ya lo "
+            "estamos revisando y que vuelva a intentar aprobar la letra en un minuto."
+        )
+
+    try:
+        result = await generate_custom_song(lyric=lyric, title=title, style=style, gender=vocal_gender)
+        task_id = result.get("task_id") or result.get("id")
+    except Exception:
+        log.exception("Error arrancando la generacion en Suno (Etsy) para session_id=%s", session_id)
+        return (
+            "Hubo un problema tecnico arrancando la grabacion de la cancion. Decile al cliente que ya "
+            "lo estamos revisando y que vuelva a aprobar la letra en un momento - su pedido de Etsy no "
+            "se pierde ni se cobra dos veces."
+        )
+
+    # paid=1: en Etsy ya esta pagado - poll_web_suno_tasks_loop solo entrega pedidos pagados.
+    db.update_web_order(session_id, paid=1, step="generando", suno_task_id=task_id)
+    resultado["etsy_generando"] = True
+    return (
+        "La letra quedo aprobada y ya arranco la grabacion REAL de la cancion (no hace falta ningun paso "
+        "mas de tu parte ni del cliente). En tu mensaje de texto de este turno, avisale con calidez que la "
+        "letra quedo lista y que en unos minutos su cancion va a aparecer aca mismo en la pagina, lista "
+        "para escuchar y descargar."
+    )
+
+
 async def _finalizar_letra(session_id: str, order: dict, precio: dict, tool_input: dict, resultado: dict) -> str:
     title = tool_input.get("title", "")
     style = tool_input.get("style", "")
@@ -166,6 +218,9 @@ async def _finalizar_letra(session_id: str, order: dict, precio: dict, tool_inpu
         log.warning(
             "finalizar_letra (web) llamado sin nombre para session_id=%s", session_id
         )
+
+    if order.get("gateway") == "etsy":
+        return await _finalizar_letra_etsy(session_id, order, title, style, lyric, vocal_gender, resultado)
 
     language = order.get("language", "es")
     if language == "en":
@@ -350,6 +405,9 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
         # pedido real, el frontend redirige a esta sesion en vez de seguir
         # en la nueva - ver retomarSesion() en landing.py.
         "redirect_session_id": None,
+        # pedido de Etsy: la letra se aprobo y la grabacion ya arranco, sin pago ni preview
+        # (ver _finalizar_letra_etsy) - el frontend pasa directo a "grabando".
+        "etsy_generando": False,
     }
 
     async def ejecutar_herramienta(name: str, tool_input: dict) -> str:
@@ -369,8 +427,11 @@ async def handle_web_chat(session_id: str, text: str) -> dict:
 
     system_prompt = build_web_content_system_prompt(
         precio["texto"], language=language, landing_flow=order.get("landing_flow") or "v1",
+        etsy=order.get("gateway") == "etsy",
     )
     tools = WEB_CONTENT_TOOLS_EN if language == "en" else WEB_CONTENT_TOOLS
+    if order.get("gateway") == "etsy":
+        tools = WEB_CONTENT_TOOLS_ETSY
 
     for _ in range(MAX_TOOL_ROUNDS):
         try:
