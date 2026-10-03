@@ -24,6 +24,7 @@ from app.claude_client import (
 from app.config import BASE_URL, resolve_precio_orden
 from app.dlocal_client import create_payment
 from app import etsy_client
+from app.lang_guard import looks_spanish
 from app.stripe_client import create_checkout_session
 from app.suno_client import generate_custom_song
 
@@ -199,6 +200,18 @@ async def _finalizar_letra(session_id: str, order: dict, precio: dict, tool_inpu
         if prefijo:
             lyric = lyric[idx:].lstrip()
             style = f"{style} {prefijo}".strip() if style else prefijo
+
+    # Red de seguridad de idioma (EN: sitio de EE.UU. y Etsy): el prompt ya exige letra en ingles pero a veces el
+    # modelo se desliza al espanol (estilos latinos, nombres en espanol). Si la letra quedo en espanol NO se guarda,
+    # no se gasta credito y no se genera nada - se le pide al modelo reescribirla en ingles y repetir la aprobacion.
+    if order.get("language") == "en" and looks_spanish(lyric):
+        log.warning("Letra en espanol detectada en sesion EN %s - se pide reescribirla en ingles", session_id)
+        return (
+            "NO se genero nada todavia: la letra que mandaste esta en ESPANOL y este servicio es solo en INGLES. "
+            "Reescribi la letra COMPLETA en ingles (los nombres propios y apodos en espanol se quedan tal cual dentro "
+            "de la letra en ingles), mostrasela de nuevo al cliente con una breve disculpa, y esperá su aprobacion "
+            "explicita de esta version en ingles antes de volver a llamar finalizar_letra."
+        )
 
     db.save_web_final_letra(session_id, title, style, lyric, gender=vocal_gender)
     if email and "@" in email:
