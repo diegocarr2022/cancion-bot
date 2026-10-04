@@ -5,6 +5,8 @@ pago via webhook) -> Claude API (escribe letra) -> Suno via AceDataCloud
 (genera audio) -> Telegram (entrega el archivo). Todo automático, sin pasos
 manuales en el camino feliz.
 
+> **Canciones vendidas en Etsy:** ver [ETSY_INTEGRATION.md](ETSY_INTEGRATION.md) (landing `/etsy`, canje de pedidos, créditos, PDF en vinil, solo inglés).
+
 ## Que necesitas antes de desplegar
 
 1. **Bot de Telegram**: habla con [@BotFather](https://t.me/BotFather) en Telegram,
