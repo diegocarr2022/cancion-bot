@@ -50,7 +50,7 @@
 - **Estado de las variables de Render:** `ETSY_WORKER_URL`, `ETSY_REDEEM_KEY`, `ETSY_SONG_PRODUCT` puestas; `ETSY_TEST_ORDERS`
   **vacía** (se quitó el 2026-10-04 porque era una puerta trasera de canciones gratis).
 - **Publicidad:** Etsy Ads activo a **US$1/día solo para el pack** (MX$599). Revisar a los 5-7 días.
-- **Pendiente más importante:** el chat pregunta casi todo en **un solo mensaje largo**; Diego quiere que se sienta como **conversación**, en pasos cortos de 1 o 2 preguntas relacionadas (ver §18.1).
+- **Hecho (2026-10-04, commit 9636a65):** el chat ya va en pasos cortos de 1-2 preguntas relacionadas (ver §18.1). Probado en producción de punta a punta hasta la letra.
 - **Pruebas:** `bash tests/etsy/run_all.sh` (7 archivos, ~110 verificaciones, todas locales). Pasaban todas al cierre.
 
 ---
@@ -528,7 +528,9 @@ registros de trabajo (consulta Suno y cuesta centavos). Más la **compra real de
 
 ## 18. Pendientes y mejoras propuestas
 
-### 18.1 (el más importante) Ritmo del chat: que se sienta como conversación
+### 18.1 (RESUELTO 2026-10-04, commit 9636a65) Ritmo del chat: que se sienta como conversación
+**Estado:** aplicado el punto 1 de la plantilla EN (aplica al sitio EN y a Etsy). Prueba real en producción (7 turnos): quién+ocasión → estilo → voz → anécdota → firma → correo → letra; sin bloques. Detalle: si el cliente no ha dado su nombre, el bot lo vuelve a pedir pegado a la siguiente pregunta (es el paso de nombre de la plantilla). Lo de abajo es el contexto original.
+
 **Feedback de Diego (2026-10-04, con captura de pantalla del chat en vivo):** tras el nombre, el bot "me aventó todo lo que necesitaba escribir de un trancazo": quién/ocasión, estilo, voz, anécdotas, apodo
 de firma y correo, todo en un solo mensaje. Antes de Etsy iba **por partes**: (1) para quién es y cuál es la ocasión, (2) qué estilo, (3) voz masculina o femenina, (4) un comentario sobre lo que dijo y luego
 "ahora platícame una anécdota / lo que más te gusta de ella / una broma interna", **dejando espacio para escribir**, (5) más preguntas **solo si hacía falta**, (6) el correo al final para el respaldo. "Se sentía
