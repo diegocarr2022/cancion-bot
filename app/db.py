@@ -512,11 +512,13 @@ def get_recent_deliveries(limit: int = 20):
         rows = conn.execute(
             """
             SELECT 'telegram' AS canal, CAST(chat_id AS TEXT) AS id, final_title AS titulo,
-                   amount_mxn AS monto, 'MXN' AS moneda, updated_at
+                   amount_mxn AS monto, 'MXN' AS moneda, updated_at,
+                   NULL AS gateway, NULL AS etsy_order_number
             FROM orders WHERE step = 'entregado'
             UNION ALL
             SELECT 'web' AS canal, session_id AS id, final_title AS titulo,
-                   amount_mxn AS monto, currency AS moneda, updated_at
+                   amount_mxn AS monto, currency AS moneda, updated_at,
+                   gateway, etsy_order_number
             FROM web_orders WHERE step = 'entregado'
             ORDER BY updated_at DESC
             LIMIT ?
@@ -844,6 +846,18 @@ def get_web_stats():
             "entregados": entregados,
             "ingresos_por_moneda": [dict(r) for r in ingresos_rows],
         }
+
+
+def get_etsy_web_stats() -> dict:
+    """Sesiones que llegaron por la landing de Etsy (/etsy): cuantas, cuantas con letra aprobada y entregadas.
+    Solo cuenta pedidos reales (excluye los de prueba, source='etsy-test')."""
+    with get_conn() as conn:
+        r = conn.execute(
+            "SELECT COUNT(*) AS total, COALESCE(SUM(delivered), 0) AS entregadas, "
+            "COUNT(DISTINCT etsy_order_number) AS pedidos "
+            "FROM web_orders WHERE gateway = 'etsy' AND COALESCE(source, '') != 'etsy-test'"
+        ).fetchone()
+        return dict(r)
 
 
 def get_all_web_orders(limit: int = 300):

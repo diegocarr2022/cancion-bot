@@ -11,7 +11,7 @@ export TELEGRAM_BOT_TOKEN=test ACEDATACLOUD_API_TOKEN=test DLOCAL_API_KEY=test D
        ADMIN_PANEL_PASSWORD=test BASE_URL=http://localhost:8000 DB_PATH=/tmp/cb-test.db MEDIA_DIR=/tmp/cb-media
 unset ETSY_WORKER_URL ETSY_REDEEM_KEY ETSY_TEST_ORDERS            # cada prueba fija las suyas
 fail=0
-for t in test_lang test_etsy test_variation test_vinyl test_lang_normal test_testorder test_regression; do
+for t in test_lang test_etsy test_variation test_vinyl test_lang_normal test_testorder test_regression test_admin; do
   echo "=== $t"
   out=$("$VENV/bin/python" "tests/etsy/$t.py" 2>&1); code=$?
   echo "$out" | grep -E "^(PASS|FAIL)|OK$|ALL TESTS PASSED" | sed 's/^/   /'

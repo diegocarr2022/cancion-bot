@@ -1277,6 +1277,16 @@ h2 { font-size:13px; text-transform:uppercase; letter-spacing:0.04em; color:#6b7
 """
 
 
+def _etiqueta_canal_web(o: dict, con_link: bool = False) -> str:
+    """Pedidos que llegaron por la landing de Etsy se identifican por su NUMERO DE PEDIDO de Etsy ('Etsy #123...')
+    en vez de 'web': asi el admin sabe de que cliente es cada conversacion."""
+    if (o.get("gateway") or "") == "etsy":
+        num = html.escape(str(o.get("etsy_order_number") or "?"))
+        prueba = " (prueba)" if (o.get("source") or "") == "etsy-test" else ""
+        return f"🛍️ Etsy #{num}{prueba}"
+    return "🌐 Web"
+
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_panel(response: Response, _: bool = Depends(_verificar_admin)):
     # Panel interno - ya esta protegido por contraseña, pero de todos modos
@@ -1288,6 +1298,7 @@ async def admin_panel(response: Response, _: bool = Depends(_verificar_admin)):
     bots_filtrados = db.get_bot_clicks_total()
     web_stats = db.get_web_stats()
     web_orders = db.get_all_web_orders(limit=300)
+    etsy_stats = db.get_etsy_web_stats()
     entregas_recientes = db.get_recent_deliveries()
     # Ingresos web separados por moneda (no se pueden sumar MXN + PEN + COP
     # como si fueran la misma unidad) - se muestran uno junto al otro.
@@ -1297,7 +1308,7 @@ async def admin_panel(response: Response, _: bool = Depends(_verificar_admin)):
 
     filas_entregas = ""
     for e in entregas_recientes:
-        canal_label = "📱 Telegram" if e["canal"] == "telegram" else "🌐 Web"
+        canal_label = "📱 Telegram" if e["canal"] == "telegram" else _etiqueta_canal_web(e)
         detalle_href = f"/admin/orden/{e['canal']}/{e['id']}"
         titulo_e = e.get("titulo") or "—"
         monto_e = f"${e['monto']:.0f} {e['moneda']}" if e.get("monto") else "—"
@@ -1325,6 +1336,9 @@ async def admin_panel(response: Response, _: bool = Depends(_verificar_admin)):
         gateway = o.get("gateway") or "—"
         tier = o.get("tier") or "song"
         canal = f"{idioma} · {gateway}" + (" · +video" if tier == "song_video" else "")
+        if gateway == "etsy":
+            canal = (f"<strong style='color:#c2410c; font-size:13.5px;'>{_etiqueta_canal_web(o)}</strong>"
+                     + (" · variación" if o.get("parent_session_id") else ""))
         filas_web += f"""
         <tr>
           <td>{nombre}</td>
@@ -1432,6 +1446,8 @@ async def admin_panel(response: Response, _: bool = Depends(_verificar_admin)):
             <div class="value">{web_stats['entregados']}</div></div>
           <div class="card"><div class="label">Ingresos</div>
             <div class="value">{ingresos_web_texto}</div></div>
+          <div class="card"><div class="label">🛍️ Sesiones Etsy ({etsy_stats['pedidos']} pedidos)</div>
+            <div class="value">{etsy_stats['total']} <span style="font-size:13px; color:#6b7280;">· {etsy_stats['entregadas']} entregadas</span></div></div>
         </div>
 
         <h2 style="font-size:16px; margin: 32px 0 4px;">🎵 Últimas entregas (todos los canales)</h2>
@@ -1584,7 +1600,7 @@ async def admin_charlas_abandonadas(
         filas = conn.execute(
             """
             SELECT session_id, landing_flow, created_at, updated_at, messages,
-                   client_ip, client_user_agent, fbclid, source
+                   client_ip, client_user_agent, fbclid, source, gateway, etsy_order_number
             FROM web_orders
             WHERE language = 'en' AND step = 'charlando' AND created_at >= ?
             ORDER BY created_at DESC
@@ -1637,6 +1653,7 @@ async def admin_charlas_abandonadas(
             "client_user_agent": f["client_user_agent"],
             "fbclid": f["fbclid"],
             "source": f["source"],
+            "etsy_order_number": f["etsy_order_number"] if f["gateway"] == "etsy" else None,
             "mensajes": resumen,
         })
     return {"desde": desde, "total": len(resultado), "sesiones": resultado}
@@ -1651,19 +1668,30 @@ async def admin_orden_web(session_id: str, response: Response, _: bool = Depends
     transcripcion = _render_transcript_html(db.get_web_messages(session_id))
     letra = html.escape(order.get("final_lyric") or "")
     voz_pedida = {"f": "Femenina", "m": "Masculina"}.get(order.get("final_gender"), "Sin preferencia especificada")
+    es_etsy = order.get("gateway") == "etsy"
+    titulo_pagina = f"Pedido Etsy #{order.get('etsy_order_number')}" if es_etsy else f"Pedido web {session_id[:8]}"
+    titulo_h1 = (_etiqueta_canal_web(order).replace("🛍️ ", "🛍️ Pedido ") if es_etsy else "Pedido web")
+    bloque_etsy = ""
+    if es_etsy:
+        bloque_etsy = f"<p><strong>Número de pedido de Etsy:</strong> {html.escape(str(order.get('etsy_order_number') or '—'))}"
+        if order.get("parent_session_id"):
+            padre = html.escape(str(order.get("parent_session_id")))
+            bloque_etsy += f' · variación de la sesión <a href="/admin/orden/web/{padre}" style="color:#c2410c;">{padre[:8]}</a>'
+        bloque_etsy += "</p>"
     return f"""
     <html>
-      <head><meta charset="utf-8"><title>Pedido web {session_id[:8]}</title>
+      <head><meta charset="utf-8"><title>{html.escape(titulo_pagina)}</title>
         <style>{_ADMIN_DETALLE_CSS}</style>
       </head>
       <body>
         <a class="volver" href="/admin">← Volver al panel</a>
-        <h1 style="font-size:20px; margin:16px 0;">Pedido web — {html.escape(order.get('customer_name') or 'sin nombre')}</h1>
+        <h1 style="font-size:20px; margin:16px 0;">{titulo_h1} — {html.escape(order.get('customer_name') or 'sin nombre')}</h1>
         <div class="card">
           <h2>Datos</h2>
           <p><strong>Correo:</strong> {html.escape(order.get('email') or '—')}</p>
           <p><strong>País / idioma:</strong> {html.escape(order.get('country') or '—')} · {html.escape(order.get('language') or 'es')}</p>
           <p><strong>Pasarela:</strong> {html.escape(order.get('gateway') or '—')}</p>
+          {bloque_etsy}
           <p><strong>ID de orden de pago:</strong> {html.escape(order.get('payment_request_id') or '—')}</p>
           <p><strong>Estado:</strong> {html.escape(order.get('step') or '—')} · pagado: {'sí' if order.get('paid') else 'no'} · entregado: {'sí' if order.get('delivered') else 'no'}</p>
           <p><strong>Creado:</strong> {(order.get('created_at') or '')[:16].replace('T', ' ')}</p>

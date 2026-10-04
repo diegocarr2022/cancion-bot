@@ -574,3 +574,13 @@ y el párrafo que agregué sobre firma/destinatario sumó preguntas al mismo blo
 - Detesta el desperdicio visual y el texto que no comunica ("no dice nada"): piensa siempre en cómo se ve en miniatura y sin sonido.
 - No quiere reseñas falsas ni promesas que el sistema no cumple.
 - Memoria del proyecto (en el entorno de Claude de Photo_Stocker): `~/.claude/projects/-Users-minds-Photo-Stocker/memory/project_etsy_tunecraft_songs.md` tiene el diario detallado de esta integración.
+
+## 19. Panel de admin: identificación por número de pedido (2026-10-04)
+Las sesiones que llegan por `/etsy` ya no aparecen como "Web / EN · etsy" en `/admin`: se muestran como **🛍️ Etsy #<número de pedido>** (con "(prueba)" para los pedidos de prueba y "· variación" si son "misma letra, otro estilo"):
+- tabla de sesiones web (columna Canal) y "Últimas entregas";
+- página de detalle (`/admin/orden/web/<session>`): título "Pedido Etsy #…", número de pedido y enlace a la sesión original si es una variación;
+- tarjeta "🛍️ Sesiones Etsy (N pedidos · M entregadas)" (excluye pedidos de prueba);
+- `/admin/charlas-abandonadas` devuelve `etsy_order_number` en cada sesión.
+Código: `_etiqueta_canal_web()` en `main.py`, `get_etsy_web_stats()` y `get_recent_deliveries()` en `db.py`. Prueba: `tests/etsy/test_admin.py`.
+Nota: solo se registra una sesión cuando el cliente valida su número de pedido y empieza; las visitas a `/etsy` que no validan un pedido no dejan registro.
+
